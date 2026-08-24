@@ -96,7 +96,7 @@ CF_OWN_ROOT_DOMAINS = {
     "cf-ipfs.com",
 }
 
-# 巨型科技站黑名单（主域名）—— 走 CF 但非"冷门优选"目标，跳过不入库不扩散
+# 巨型科技站黑名单（主域名）—— 走 CF 但非"冷门优选"目标，仅作矿源：不入库但允许扩散其外链
 # 注意：CF 官方域名（cloudflare.com 等）不在此列，它们不入库但仍作为扩散矿源
 BIG_TECH_ROOTS = {
     "google.com", "googleapis.com", "gstatic.com", "youtube.com", "gmail.com",
@@ -368,9 +368,10 @@ def run_cf_explorer():
 
                 print(f"[?] 检测: {current:<40}", end="", flush=True)
 
-                # 巨型科技站黑名单：直接跳过，不入库不扩散
+                # 巨型科技站黑名单：不入库，但允许抓取其页面外链作为矿源继续扩散
                 if is_big_tech(current):
-                    print(" -> [巨型站黑名单 跳过]")
+                    print(" -> [巨型站 不入库但扩散外链]")
+                    _expand(current, enqueue, visited, non_cf_roots, priority=False)
                     continue
 
                 if is_cloudflare_own_domain(current):
