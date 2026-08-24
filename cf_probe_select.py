@@ -391,7 +391,9 @@ def run_cf_explorer():
                     print(" -> [CF官方域名 探索外链]")
                     _expand(current, enqueue, visited, non_cf_roots, priority=True)
                 elif current in saved:
-                    print(" -> [已在记录中 跳过]")
+                    # 已记录的域名不再入库，但仍抓取页面外链以发现新域名（矿源）
+                    print(" -> [已在记录中 仅扩散外链]")
+                    _expand(current, enqueue, visited, non_cf_roots, priority=is_cf)
                 elif is_cf:
                     if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
                         print(f" -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
