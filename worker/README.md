@@ -33,12 +33,14 @@ wrangler deploy
 
 ### 方式二：Cloudflare Dashboard（Git 自动部署）
 
-1. 在 Cloudflare Dashboard 进入 **Workers & Pages** → **创建**
-2. 选择 **连接到 Git** → 授权你的 GitHub 账号 → 选择 `joelin818818/cf-probe-select`
-3. 框架预设保持默认，部署命令留空；Wrangler 会自动读取根目录的 `wrangler.toml`
-4. 点击 **保存并部署**
+1. 在 Cloudflare Dashboard 进入 **Workers & Pages** → **Create**（创建）
+2. 选择 **Connect to Git**（连接到 Git）→ 授权 GitHub → 选择仓库 `joelin818818/cf-probe-select`
+3. 由于仓库根目录已存在 `wrangler.toml`，Cloudflare 会自动识别为 Worker 项目，**无需选择框架预设、部署命令留空**
+4. 点击 **Save and Deploy**（保存并部署）
 
 之后每次推送到 `main` 分支，Cloudflare 都会自动重新部署。
+
+> 若 Dashboard 提示「未检测到 Wrangler 配置」，请确认 `wrangler.toml` 已存在于仓库 `main` 分支的**根目录**（而非 `worker/` 子目录）。本仓库的配置已放在根目录。
 
 部署后访问分配的 `*.workers.dev` 域名即可。可在 `wrangler.toml` 中绑定自定义域名。
 
