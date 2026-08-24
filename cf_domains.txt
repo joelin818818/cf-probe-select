@@ -1,15 +1,20 @@
 # CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积）
 # 由脚本自动更新，请勿手动编辑
+a.pub.network
 app.termly.io
-cdn.jsdelivr.net
+apple.gadgethacks.com
+btloader.com
+cdn-client.medium.com
+cdn.confiant-integrations.net
 cdn.optimizely.com
 cdn.prod.website-files.com
+dashboard.freestar.io
 developer.vimeo.com
 example.com
 geolocation.onetrust.com
 help.klaviyo.com
+help.speechify.com
 imagedelivery.net
-investors.vimeo.com
 js.hs-scripts.com
 js.hsforms.net
 kb.triplewhale.com
@@ -18,12 +23,14 @@ manage.kmail-lists.com
 marketplace.klaviyo.com
 maxcdn.bootstrapcdn.com
 medium.com
+miro.medium.com
 privacyportal-cdn.onetrust.com
+prod-trybe-platform-6mi3j.ondigitalocean.app
 soitron.com.tr
+speechify.com
 sst.wp-rocket.me
 static.elfsight.com
 static.olark.com
-sysnect.co.th
 tailwindcss.com
 termly.io
 tinyurl.com
@@ -32,6 +39,8 @@ vimeo.com
 wp-rocket.me
 www.canva.com
 www.klaviyo.com
+www.news.aakashg.com
+www.perplexity.ai
 www.soitron.com.tr
 www.soitrongroup.com
 wwwcloudflare.cloudflareaccess.com
