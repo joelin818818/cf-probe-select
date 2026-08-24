@@ -1,4 +1,3 @@
 # CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积）
 # 由脚本自动更新，请勿手动编辑
-imagedelivery.net
-one.one.one.one
+
