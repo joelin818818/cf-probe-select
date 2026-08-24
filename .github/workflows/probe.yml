@@ -55,7 +55,7 @@ jobs:
           if [ -z "$(git status --porcelain cf_domains.txt)" ]; then
             echo "无变更，跳过提交"
           else
-            git commit -m "chore: auto probe update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git commit -m "chore: 自动探测更新 $(TZ=Asia/Shanghai date +%Y-%m-%dT%H:%M:%S)"
             # 先拉取远程变更再推送，避免非快进冲突
             git pull --rebase --autostash
             git push
