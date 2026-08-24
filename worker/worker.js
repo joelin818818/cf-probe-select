@@ -2,9 +2,10 @@
  * cf-probe-select 测速前端 Worker（原生 JS，无需构建）
  *
  * 路由：
- *   GET /                -> 返回 index.html 网页
- *   GET /api/domains     -> 代理读取 GitHub 仓库最新的 cf_domains.txt
- *   GET /api/health      -> 健康检查
+ *   GET /                        -> 返回 index.html 网页
+ *   GET /api/domains             -> 代理读取 GitHub 仓库最新的 cf_domains.txt
+ *   GET /api/resolve?domain=...  -> 解析域名 A 记录并返回前 3 个 IP 的归属地
+ *   GET /api/health              -> 健康检查
  *
  * 测速逻辑放在浏览器端：网页对每个域名发起请求并计时，
  * 真实反映「用户 -> 各 CF 节点」的延迟，用户自行选择最快节点。
@@ -13,6 +14,47 @@
 // cf_domains.txt 在 GitHub 仓库的位置（main 分支）
 const RAW_DOMAINS_URL =
   "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
+
+// 国家英文名 -> 中文名（ipwho.is 返回英文，做常用映射）
+const COUNTRY_MAP = {
+  "United States": "美国",
+  "Netherlands": "荷兰",
+  "Germany": "德国",
+  "United Kingdom": "英国",
+  "Japan": "日本",
+  "Singapore": "新加坡",
+  "France": "法国",
+  "Canada": "加拿大",
+  "Australia": "澳大利亚",
+  "Hong Kong": "香港",
+  "South Korea": "韩国",
+  "India": "印度",
+  "Brazil": "巴西",
+  "Sweden": "瑞典",
+  "Finland": "芬兰",
+  "Poland": "波兰",
+  "Ireland": "爱尔兰",
+  "Switzerland": "瑞士",
+  "Belgium": "比利时",
+  "Austria": "奥地利",
+  "Norway": "挪威",
+  "Denmark": "丹麦",
+  "Spain": "西班牙",
+  "Italy": "意大利",
+  "Russia": "俄罗斯",
+  "China": "中国",
+  "Taiwan": "台湾",
+  "Turkey": "土耳其",
+  "United Arab Emirates": "阿联酋",
+  "Israel": "以色列",
+  "Mexico": "墨西哥",
+  "South Africa": "南非",
+  "Thailand": "泰国",
+  "Vietnam": "越南",
+  "Malaysia": "马来西亚",
+  "Indonesia": "印尼",
+  "Philippines": "菲律宾",
+};
 
 export default {
   async fetch(request, env, ctx) {
@@ -40,6 +82,15 @@ export default {
         return json({ count: domains.length, domains });
       }
 
+      if (path === "/api/resolve") {
+        const domain = url.searchParams.get("domain");
+        if (!domain) {
+          return json({ error: "缺少 domain 参数" }, 400);
+        }
+        const ips = await resolveIps(domain);
+        return json({ domain, ips });
+      }
+
       if (path === "/api/health") {
         return json({ ok: true, time: new Date().toISOString() });
       }
@@ -50,6 +101,68 @@ export default {
     }
   },
 };
+
+async function resolveIps(domain) {
+  try {
+    let answers = await dohResolve(domain, "https://cloudflare-dns.com/dns-query");
+    if (!answers.length) {
+      answers = await dohResolve(domain, "https://dns.google/resolve");
+    }
+    answers = answers.slice(0, 3);
+
+    const out = [];
+    for (const ans of answers) {
+      const ip = ans.data;
+      const loc = await fetchIpLocation(ip);
+      out.push({ ip, country: loc.country, countryCode: loc.countryCode });
+    }
+    return out;
+  } catch (e) {
+    return [];
+  }
+}
+
+async function dohResolve(domain, baseUrl) {
+  try {
+    const url =
+      baseUrl +
+      "?name=" +
+      encodeURIComponent(domain) +
+      "&type=A" +
+      (baseUrl.includes("google") ? "" : "");
+    const res = await fetch(url, {
+      headers: { Accept: "application/dns-json" },
+      cf: { cacheTtl: 300 },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.Answer || []).filter((a) => a.type === 1);
+  } catch (e) {
+    return [];
+  }
+}
+
+async function fetchIpLocation(ip) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 3000);
+    const res = await fetch(`https://ipwho.is/${ip}`, {
+      signal: ctrl.signal,
+      cf: { cacheTtl: 86400 },
+    });
+    clearTimeout(t);
+    if (!res.ok) return { country: "-", countryCode: "-" };
+    const data = await res.json();
+    if (!data.success) return { country: "-", countryCode: "-" };
+    const en = data.country || "-";
+    return {
+      country: COUNTRY_MAP[en] || en,
+      countryCode: data.country_code || "-",
+    };
+  } catch (e) {
+    return { country: "-", countryCode: "-" };
+  }
+}
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -102,9 +215,9 @@ function html() {
   button.ghost { background: transparent; border: 1px solid var(--line); color: var(--fg); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .status { color: var(--muted); font-size: 13px; }
-  .wrap { padding: 12px 24px 40px; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .wrap { padding: 12px 24px 40px; overflow-x: auto; }
+  table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th { color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
   th:hover { color: var(--fg); }
   tr.row { cursor: pointer; }
@@ -114,6 +227,9 @@ function html() {
   .timeout { color: var(--warn); }
   .err { color: var(--bad); }
   .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .ip-list { display: flex; flex-direction: column; gap: 4px; }
+  .ip-item { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+  .cc { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); padding: 0 5px; border-radius: 4px; white-space: nowrap; }
   .empty { color: var(--muted); padding: 40px; text-align: center; }
   .rank { color: var(--muted); width: 40px; }
   .best { color: var(--accent); font-weight: 700; }
@@ -139,12 +255,13 @@ function html() {
       <tr>
         <th class="rank">#</th>
         <th data-sort="domain">域名</th>
+        <th data-sort="ip">IP 归属地（前 3）</th>
         <th data-sort="lat">延迟 (ms)</th>
         <th data-sort="status">状态</th>
       </tr>
     </thead>
     <tbody id="tbody">
-      <tr><td colspan="4" class="empty">加载中…</td></tr>
+      <tr><td colspan="5" class="empty">加载中…</td></tr>
     </tbody>
   </table>
 </div>
@@ -153,6 +270,7 @@ function html() {
 const TIMEOUT = 8000; // 单域名测速超时
 let domains = [];
 let results = []; // {domain, lat, status}
+let ipMap = {};   // domain -> [{ip, country, countryCode}]
 let testing = false;
 
 const tbody = document.getElementById("tbody");
@@ -165,17 +283,44 @@ async function loadDomains() {
   document.getElementById("src").textContent =
     "数据源：GitHub 自动探测累积 · 共 " + domains.length + " 个域名";
   render();
+  resolveAllIps();
+}
+
+async function resolveAllIps() {
+  const CONC = 5;
+  for (let i = 0; i < domains.length; i += CONC) {
+    const batch = domains.slice(i, i + CONC);
+    await Promise.all(batch.map(async (d) => {
+      try {
+        const r = await fetch("/api/resolve?domain=" + encodeURIComponent(d));
+        const data = await r.json();
+        ipMap[d] = data.ips || [];
+      } catch (e) {
+        ipMap[d] = [];
+      }
+      render();
+    }));
+  }
+}
+
+function ipHtml(domain) {
+  const list = ipMap[domain];
+  if (!list) return '<span class="badge">解析中</span>';
+  if (!list.length) return '<span class="badge">—</span>';
+  return '<div class="ip-list">' + list.map(x =>
+    \`<div class="ip-item"><span>\${x.ip}</span><span class="cc">\${x.country}</span></div>\`
+  ).join("") + '</div>';
 }
 
 function render() {
   if (!results.length && !testing) {
     if (!domains.length) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty">暂无域名数据</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">暂无域名数据</td></tr>';
       return;
     }
     tbody.innerHTML = domains
       .map((d, i) => \`<tr class="row" data-d="\${d}"><td class="rank">\${i + 1}</td>
-        <td>\${d}</td><td class="lat">—</td><td><span class="badge">未测</span></td></tr>\`)
+        <td>\${d}</td><td>\${ipHtml(d)}</td><td class="lat">—</td><td><span class="badge">未测</span></td></tr>\`)
       .join("");
     return;
   }
@@ -188,7 +333,7 @@ function render() {
       else { cls += " err"; txt = "✕"; st = '<span class="badge">失败</span>'; }
       const best = i === 0 && r.status === "ok" ? "best" : "";
       return \`<tr class="row \${best}" data-d="\${r.domain}"><td class="rank">\${i + 1}</td>
-        <td>\${r.domain}</td><td class="\${cls}">\${txt}</td><td>\${st}</td></tr>\`;
+        <td>\${r.domain}</td><td>\${ipHtml(r.domain)}</td><td class="\${cls}">\${txt}</td><td>\${st}</td></tr>\`;
     })
     .join("");
 }
@@ -197,6 +342,11 @@ let sortMode = "lat";
 function sortFn(a, b) {
   if (sortMode === "domain") return a.domain.localeCompare(b.domain);
   if (sortMode === "status") return a.status.localeCompare(b.status);
+  if (sortMode === "ip") {
+    const ca = ipMap[a.domain]?.[0]?.country || "zzz";
+    const cb = ipMap[b.domain]?.[0]?.country || "zzz";
+    return ca.localeCompare(cb);
+  }
   // 延迟升序：ok 优先，其次 timeout，最后 err；同状态按数值
   const rank = (s) => (s === "ok" ? 0 : s === "timeout" ? 1 : 2);
   if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
