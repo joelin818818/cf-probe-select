@@ -14,6 +14,7 @@ venv/
 .codebuddy/
 
 # Cloudflare Worker 本地运行缓存与临时构建产物
+.wrangler/
 worker/.wrangler/
 
 # 注意：cf_domains.txt 需纳入版本控制（探测结果回推仓库），不再忽略
