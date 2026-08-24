@@ -69,7 +69,10 @@ export default {
       }
 
       if (path === "/api/domains") {
-        const res = await fetch(RAW_DOMAINS_URL, { cf: { cacheTtl: 60 } });
+        const res = await fetch(RAW_DOMAINS_URL, {
+          cf: { cacheTtl: 0 },
+          cache: "no-store",
+        });
         if (!res.ok) {
           return json({ error: "无法读取域名列表", status: res.status }, 502);
         }
@@ -297,6 +300,7 @@ function html() {
   .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
   .ip-list { display: flex; flex-direction: column; gap: 4px; }
   .ip-item { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+  .ip-lat { font-size: 11px; color: var(--good); margin-left: 2px; font-variant-numeric: tabular-nums; }
   .cc { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); padding: 0 5px; border-radius: 4px; white-space: nowrap; }
   .cf-yes { color: var(--good); font-weight: 700; }
   .cf-no { color: var(--bad); font-weight: 700; }
@@ -318,9 +322,10 @@ function html() {
 
 <div class="bar">
   <button id="start">开始测速</button>
+  <button id="refresh" class="ghost">刷新域名</button>
   <button id="sort" class="ghost">按延迟排序</button>
   <button id="copyAll" class="ghost">复制全部（按延迟）</button>
-  <span class="status" id="info">点击「开始测速」对每个域名测 3 轮取平均延迟</span>
+  <span class="status" id="info">点击「开始测速」对每个 IP 各测 3 轮取平均延迟</span>
 </div>
 
 <div class="wrap">
@@ -329,7 +334,7 @@ function html() {
       <tr>
         <th class="rank">#</th>
         <th data-sort="domain">域名</th>
-        <th data-sort="ip">IP 归属地（前 3）</th>
+        <th data-sort="ip">IP 归属地（前 3 · 含延迟）</th>
         <th data-sort="cf">CF IP</th>
         <th data-sort="lat">延迟 (ms)</th>
         <th data-sort="status">状态</th>
@@ -352,11 +357,14 @@ const tbody = document.getElementById("tbody");
 const info = document.getElementById("info");
 
 async function loadDomains() {
-  const r = await fetch("/api/domains");
+  const r = await fetch("/api/domains", { cache: "no-store" });
   const data = await r.json();
   domains = data.domains || [];
+  // 重置上一轮结果，确保刷新后是全新数据
+  results = [];
+  ipMap = {};
   document.getElementById("src").textContent =
-    "数据源：GitHub 自动探测累积 · 共 " + domains.length + " 个域名";
+    "数据源：GitHub 自动探测累积（实时）· 共 " + domains.length + " 个域名";
   render();
   resolveAllIps();
 }
@@ -382,9 +390,11 @@ function ipHtml(domain) {
   const list = ipMap[domain];
   if (!list) return '<span class="badge">解析中</span>';
   if (!list.length) return '<span class="badge">—</span>';
-  return '<div class="ip-list">' + list.map(x =>
-    \`<div class="ip-item"><span>\${x.ip}</span><span class="cc">\${x.country}</span></div>\`
-  ).join("") + '</div>';
+  return '<div class="ip-list">' + list.map(x => {
+    const lat = (x.lat !== undefined && x.lat !== null)
+      ? \`<span class="ip-lat">\${x.lat}ms</span>\` : "";
+    return \`<div class="ip-item"><span>\${x.ip}</span><span class="cc">\${x.country}</span>\${lat}</div>\`;
+  }).join("") + '</div>';
 }
 
 // 该域名是否任一 IP 不在 CF 段（isCf === false 即判定为非 CF，疑似伪 CF）
@@ -456,12 +466,12 @@ function sortFn(a, b) {
   return 0;
 }
 
-async function measureOne(domain) {
+async function measureOne(target) {
   const t0 = performance.now();
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT);
-    await fetch("https://" + domain, {
+    await fetch("http://" + target, {
       method: "HEAD",
       mode: "no-cors",
       cache: "no-store",
@@ -475,23 +485,38 @@ async function measureOne(domain) {
   }
 }
 
+// 方案 B：对每个解析出的 IP 各自测 3 轮取平均，域名延迟 = 各 IP 延迟的平均
 async function measure(domain) {
+  const list = ipMap[domain] || [];
+  if (!list.length) {
+    return { domain, lat: null, status: "err" };
+  }
   const ROUNDS = 3;
-  const times = [];
+  let allTimes = [];
   let hadTimeout = false;
   let hadErr = false;
-  for (let i = 0; i < ROUNDS; i++) {
-    const r = await measureOne(domain);
-    if (typeof r === "number") {
-      times.push(r);
-    } else if (r === "timeout") {
-      hadTimeout = true;
+
+  for (const item of list) {
+    item.lat = undefined; // 清除上轮结果，避免显示旧值
+    const times = [];
+    for (let i = 0; i < ROUNDS; i++) {
+      const r = await measureOne(item.ip);
+      if (typeof r === "number") times.push(r);
+      else if (r === "timeout") hadTimeout = true;
+      else hadErr = true;
+    }
+    // 该 IP 的延迟（取 3 轮有效平均；全失败则标记）
+    if (times.length > 0) {
+      item.lat = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+      allTimes.push(item.lat);
     } else {
-      hadErr = true;
+      item.lat = null;
+      if (hadErr) { /* 计入错误 */ }
     }
   }
-  if (times.length > 0) {
-    const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+
+  if (allTimes.length > 0) {
+    const avg = Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length);
     return { domain, lat: avg, status: "ok" };
   }
   if (hadTimeout) {
@@ -506,8 +531,12 @@ async function startTest() {
   document.getElementById("start").disabled = true;
   results = [];
   let done = 0;
+  // 等待 IP 解析完成（若用户提前点击）
+  while (Object.keys(ipMap).length < domains.length) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
   info.textContent = "测速中… 0 / " + domains.length;
-  // 并发 8 个，逐批测速，每域名测 3 轮取平均
+  // 并发 8 个，逐批测速，每个 IP 各测 3 轮取平均
   const CONC = 8;
   for (let i = 0; i < domains.length; i += CONC) {
     const batch = domains.slice(i, i + CONC);
@@ -536,7 +565,15 @@ tbody.addEventListener("click", (e) => {
   if (tr) copyText(tr.dataset.d);
 });
 
-document.getElementById("start").addEventListener("click", startTest);
+document.getElementById("start").addEventListener("click", async () => {
+  // 测速前先重新拉取最新域名列表（实时）
+  await loadDomains();
+  startTest();
+});
+document.getElementById("refresh").addEventListener("click", () => {
+  if (testing) return;
+  loadDomains();
+});
 document.getElementById("sort").addEventListener("click", () => {
   sortMode = "lat"; render();
 });

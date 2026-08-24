@@ -63,8 +63,8 @@ from bs4 import BeautifulSoup  # noqa: E402
 
 # ==================== 2. 核心配置 ====================
 
-# Cloudflare 官方 IPv4 CIDR 列表
-CF_IP_RANGES = [
+# Cloudflare 官方 IPv4 CIDR 列表（启动时会拉取最新，失败则用此兜底）
+CF_IP_RANGES_FALLBACK = [
     ipaddress.ip_network("173.245.48.0/20"),
     ipaddress.ip_network("103.21.244.0/22"),
     ipaddress.ip_network("103.22.200.0/22"),
@@ -81,6 +81,32 @@ CF_IP_RANGES = [
     ipaddress.ip_network("172.64.0.0/13"),
     ipaddress.ip_network("131.0.72.0/22"),
 ]
+
+
+def load_cf_ip_ranges(timeout: int = 10):
+    """从 Cloudflare 官网拉取最新 IPv4 CIDR 段，失败则返回兜底列表。"""
+    url = "https://www.cloudflare.com/ips-v4"
+    try:
+        resp = requests.get(url, timeout=timeout)
+        resp.raise_for_status()
+        ranges = []
+        for line in resp.text.splitlines():
+            line = line.strip()
+            if not line or "/" not in line:
+                continue
+            try:
+                ranges.append(ipaddress.ip_network(line, strict=False))
+            except ValueError:
+                continue
+        if ranges:
+            print(f"[*] 已拉取 Cloudflare 官方 IPv4 段 {len(ranges)} 条")
+            return ranges
+    except Exception as e:
+        print(f"[!] 拉取 CF IP 段失败，使用兜底列表: {e}")
+    return CF_IP_RANGES_FALLBACK
+
+
+CF_IP_RANGES = load_cf_ip_ranges()
 
 # Cloudflare 官方自有根域名（仅用于探索外链，不写入最终 txt）
 # 注：one.one.one.one 经 tldextract 解析后 registered domain 为 one.one
@@ -220,20 +246,38 @@ def is_big_tech(domain: str) -> bool:
 def is_cloudflare_ip(ip_str: str) -> bool:
     try:
         ip_obj = ipaddress.ip_address(ip_str)
+        # 只检查 IPv4
+        if not isinstance(ip_obj, ipaddress.IPv4Address):
+            return False
         return any(ip_obj in network for network in CF_IP_RANGES)
     except ValueError:
         return False
 
 
-def is_cloudflare_domain(domain: str) -> bool:
-    """检测域名是否走 Cloudflare CDN（DNS/IP 段快速路径优先，HEAD 兜底）"""
-    # 快速路径：DNS 解析后看 IP 是否落在 Cloudflare 官方段（通常几十 ms）
+def resolve_ips(domain: str) -> list:
+    """解析域名 A 记录，返回前几个 IPv4 地址。"""
     try:
-        ip = socket.gethostbyname(domain)
+        # socket.getaddrinfo 可返回多个 A 记录
+        infos = socket.getaddrinfo(domain, None, socket.AF_INET)
+        ips = []
+        seen = set()
+        for info in infos:
+            ip = info[4][0]
+            if ip not in seen:
+                seen.add(ip)
+                ips.append(ip)
+        return ips
+    except Exception:
+        return []
+
+
+def is_cloudflare_domain(domain: str) -> bool:
+    """检测域名是否走 Cloudflare CDN：先查多个 IP，任一命中 CF 段即保留；否则 HEAD 兜底"""
+    # 快速路径：解析所有 A 记录，任一 IP 命中 CF 官方段即认为走 CF
+    ips = resolve_ips(domain)
+    for ip in ips:
         if is_cloudflare_ip(ip):
             return True
-    except Exception:
-        pass
 
     # 兜底：发 HEAD 看 Server 头（仅在 DNS 路径未命中时走，短超时）
     for schema in ("https://", "http://"):
@@ -245,6 +289,45 @@ def is_cloudflare_domain(domain: str) -> bool:
         except requests.RequestException:
             continue
     return False
+
+
+def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
+    """落盘前最终过滤（硬标准：解析出的 IP 必须落在 Cloudflare 段）。
+
+    只用 IP 段判定，不认 Server 头——与前端展示逻辑一致。
+    多线程并发解析 + 判定，加速收尾。
+    """
+    if not saved:
+        return
+    domains = sorted(saved)
+    print(f"[*] 落盘前 CF IP 校验（仅认 IP 段，并发）: 共 {len(domains)} 个域名")
+
+    def check(domain):
+        ips = resolve_ips(domain)
+        if not ips:
+            return (domain, False, "解析失败")
+        if any(is_cloudflare_ip(ip) for ip in ips):
+            return (domain, True, ",".join(ips))
+        return (domain, False, ",".join(ips))
+
+    removed = []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for domain, ok, detail in pool.map(check, domains):
+            if ok:
+                print(f"    [✓] {domain:<45} {detail}")
+            else:
+                removed.append(domain)
+                print(f"    [-] {domain:<45} 非 CF IP {detail}，移除")
+
+    if removed:
+        for d in removed:
+            saved.discard(d)
+            root = get_registered_domain(d)
+            if root_sub_count[root] > 0:
+                root_sub_count[root] -= 1
+        print(f"[*] 已移除 {len(removed)} 个非 CF 域名，剩余 {len(saved)} 个")
+    else:
+        print("[*] 落盘前校验通过，未发现非 CF 域名")
 
 
 def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
@@ -310,7 +393,8 @@ def run_cf_explorer():
     start_time = time.time()
 
     def _flush_all():
-        """全量写回：覆盖模式，保证探测阶段结束时数据落盘"""
+        """全量写回：先过一遍 CF IP 校验，删除非 CF 域名，再落盘"""
+        filter_non_cf_domains(saved, root_sub_count)
         try:
             with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
                 f.write("# CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积）\n")
