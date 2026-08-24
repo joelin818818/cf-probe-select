@@ -44,51 +44,20 @@ python cf_probe_select.py
 ```
 cf-probe-select/
 ├── .github/workflows/probe.yml  # GitHub Actions：定时探测 + 回推
-├── cf_probe_select.py           # 阶段一：CF 站点发现与入库（GitHub Actions 运行）
-├── probe_speed.py               # 阶段二（规划）：服务端/批量测速参考实现
-├── select_rank.py               # 阶段三（规划）：按速度推优排序参考实现
+├── cf_probe_select.py           # 探测脚本：CF 站点发现与入库
 ├── worker/                      # Cloudflare Worker 测速前端（浏览器侧实时测速）
 │   ├── worker.js                # Worker 主程序 + 内嵌网页
 │   └── README.md                # Worker 使用说明
-├── wrangler.toml                # Worker 部署配置（放在根目录以便 Dashboard 自动识别）
+├── wrangler.toml                # Worker 部署配置（根目录，Dashboard 自动识别）
 ├── cf_domains.txt               # 探测结果（自动累积，供 Worker 读取）
 └── README.md
 ```
 
-## ⚠️ 安全与敏感信息（公开仓库必读）
-
-**本仓库是公开的，严禁提交任何敏感信息**（API Key、Token、密码、私钥、个人数据等）。
-
-本项目的自动探测阶段**不依赖任何密钥**，可安全运行。若你将来要扩展功能（例如调用 AI 生成描述、使用第三方测速 API），请通过 **GitHub Actions Secrets** 注入，切勿硬编码到代码或提交到仓库。
-
-### 如何在 GitHub 设置变量 / 密钥
-
-1. 打开仓库页面 → **Settings**（设置）
-2. 左侧菜单 → **Secrets and variables** → **Actions**
-3. 点击 **New repository secret**（新建仓库密钥）：
-   - **Name**：变量名，例如 `MY_API_KEY`
-   - **Secret**：变量值（密钥内容）
-4. 在代码中只通过环境变量读取，**绝不打印或写入文件**：
-
-   ```python
-   import os
-   api_key = os.environ.get("MY_API_KEY")  # 安全：仅运行时读取
-   ```
-
-5. 在 `.github/workflows/*.yml` 中引用（无需明文）：
-
-   ```yaml
-   env:
-     MY_API_KEY: ${{ secrets.MY_API_KEY }}
-   ```
-
-> 原则：**代码里只出现 `os.environ.get("XXX")`，仓库里只出现 `${{ secrets.XXX }}`，真实的密钥只存在于 GitHub 设置页。**
-
 ## 路线图
 
 1. ✅ 阶段一：发现使用 Cloudflare 的第三方站点，写入 `cf_domains.txt`（GitHub Actions 自动探测）
-2. ✅ 阶段二：测速与优选 —— 已搭建 `worker/` Cloudflare Worker 前端，在**浏览器侧**对每个域名实时测速并动态排序，用户自行选择最快节点（详见 `worker/README.md`）。`probe_speed.py` / `select_rank.py` 保留为批量/服务端参考实现。
-3. 🚧 阶段三：可选增强 —— 服务端批量预测速、`cf_domains_ranked.txt` 静态优选榜、连续多次取均值提升排序稳定性等。
+2. ✅ 阶段二：测速与优选 —— `worker/` Cloudflare Worker 前端，在**浏览器侧**对每个域名实时测速并动态排序，用户自行选择最快节点（详见 `worker/README.md`）
+3. 🚧 阶段三：可选增强 —— 服务端批量预测速、连续多次取均值提升排序稳定性等
 
 ## 许可证
 
