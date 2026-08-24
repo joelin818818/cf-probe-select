@@ -42,10 +42,14 @@ python cf_probe_select.py
 ```
 cf-probe-select/
 ├── .github/workflows/probe.yml  # GitHub Actions：定时探测 + 回推
-├── cf_probe_select.py           # 阶段一：CF 站点发现与入库
-├── probe_speed.py               # 阶段二（规划）：响应速度测试
-├── select_rank.py               # 阶段三（规划）：按速度推优排序
-├── cf_domains.txt               # 探测结果（自动累积）
+├── cf_probe_select.py           # 阶段一：CF 站点发现与入库（GitHub Actions 运行）
+├── probe_speed.py               # 阶段二（规划）：服务端/批量测速参考实现
+├── select_rank.py               # 阶段三（规划）：按速度推优排序参考实现
+├── worker/                      # Cloudflare Worker 测速前端（浏览器侧实时测速）
+│   ├── worker.js                # Worker 主程序 + 内嵌网页
+│   ├── wrangler.toml            # Worker 部署配置
+│   └── README.md                # Worker 使用说明
+├── cf_domains.txt               # 探测结果（自动累积，供 Worker 读取）
 └── README.md
 ```
 
@@ -81,8 +85,8 @@ cf-probe-select/
 ## 路线图
 
 1. ✅ 阶段一：发现使用 Cloudflare 的第三方站点，写入 `cf_domains.txt`（支持 Actions 自动探测）
-2. 🚧 阶段二：对清单内站点做响应速度测试
-3. 🚧 阶段三：按响应耗时升序排序，生成优选榜
+2. 🚧 阶段二：测速与优选 —— 已搭建 `worker/` Cloudflare Worker 前端，在**浏览器侧**对每个域名实时测速并动态排序，用户自行选择最快节点（详见 `worker/README.md`）。`probe_speed.py` / `select_rank.py` 保留为批量/服务端参考实现。
+3. 🚧 阶段三：按响应耗时升序排序，生成优选榜（前端已支持按延迟实时排序）
 
 ## 许可证
 
