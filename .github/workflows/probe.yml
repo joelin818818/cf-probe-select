@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  probe:
+  discover-cf-domains:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
