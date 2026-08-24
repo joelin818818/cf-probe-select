@@ -1,0 +1,15 @@
+# 依赖与构建产物
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行时生成的输出文件
+cf_domains.txt
+cf_domains_ranked.txt
+
+# 系统/编辑器
+.DS_Store
+.idea/
+.vscode/
