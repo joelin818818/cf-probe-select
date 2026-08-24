@@ -47,8 +47,8 @@ cf-probe-select/
 ├── select_rank.py               # 阶段三（规划）：按速度推优排序参考实现
 ├── worker/                      # Cloudflare Worker 测速前端（浏览器侧实时测速）
 │   ├── worker.js                # Worker 主程序 + 内嵌网页
-│   ├── wrangler.toml            # Worker 部署配置
 │   └── README.md                # Worker 使用说明
+├── wrangler.toml                # Worker 部署配置（放在根目录以便 Dashboard 自动识别）
 ├── cf_domains.txt               # 探测结果（自动累积，供 Worker 读取）
 └── README.md
 ```

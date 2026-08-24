@@ -1,0 +1,10 @@
+name = "cf-probe-select-speed"
+main = "worker/worker.js"
+compatibility_date = "2024-09-23"
+
+# 如需绑定自定义域名，取消下行注释并在 Cloudflare 面板添加
+# routes = [
+#   { pattern = "speed.your-domain.com", custom_domain = true }
+# ]
+
+# 无需 KV / D1，域名列表运行时从 GitHub raw 拉取

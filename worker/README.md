@@ -19,15 +19,26 @@ GitHub Actions 探测 -> cf_domains.txt (仓库累积)
 
 ```bash
 npm install -g wrangler
-cd worker
+# 从仓库根目录运行（wrangler.toml 位于根目录）
 wrangler dev        # 默认 http://localhost:8787
 ```
 
 ## 部署
 
+### 方式一：命令行（推荐）
+
 ```bash
 wrangler deploy
 ```
+
+### 方式二：Cloudflare Dashboard（Git 自动部署）
+
+1. 在 Cloudflare Dashboard 进入 **Workers & Pages** → **创建**
+2. 选择 **连接到 Git** → 授权你的 GitHub 账号 → 选择 `joelin818818/cf-probe-select`
+3. 框架预设保持默认，部署命令留空；Wrangler 会自动读取根目录的 `wrangler.toml`
+4. 点击 **保存并部署**
+
+之后每次推送到 `main` 分支，Cloudflare 都会自动重新部署。
 
 部署后访问分配的 `*.workers.dev` 域名即可。可在 `wrangler.toml` 中绑定自定义域名。
 
