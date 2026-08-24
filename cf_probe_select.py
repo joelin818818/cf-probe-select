@@ -179,8 +179,11 @@ def load_existing_domains(filepath: str):
     root_sub_count = defaultdict(int)
     if os.path.exists(filepath):
         try:
+            line_count = 0
+            parsed = 0
             with open(filepath, "r", encoding="utf-8") as f:
                 for line in f:
+                    line_count += 1
                     line = line.strip()
                     if not line or line.startswith("#"):
                         continue
@@ -188,8 +191,12 @@ def load_existing_domains(filepath: str):
                     if domain:
                         saved.add(domain)
                         root_sub_count[get_registered_domain(domain)] += 1
-        except Exception:
-            pass
+                        parsed += 1
+            print(f"[*] 读取 {filepath}: 共 {line_count} 行, 解析出 {parsed} 个域名")
+        except Exception as e:
+            print(f"[!] 读取 {filepath} 失败: {e}")
+    else:
+        print(f"[*] {filepath} 不存在，视为空")
     return saved, root_sub_count
 
 

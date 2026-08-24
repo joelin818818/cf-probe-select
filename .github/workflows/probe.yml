@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  # 同一工作流同时只能跑一个实例，避免并行探测互相覆盖 cf_domains.txt
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   discover-cf-domains:
     runs-on: ubuntu-latest
@@ -27,6 +32,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 tldextract
 
+      - name: Debug existing cf_domains.txt
+        run: |
+          echo "[debug] cwd: $(pwd)"
+          echo "[debug] file exists: $(test -f cf_domains.txt && echo YES || echo NO)"
+          if [ -f cf_domains.txt ]; then
+            echo "[debug] line count: $(wc -l < cf_domains.txt)"
+            echo "[debug] content preview:"
+            head -n 20 cf_domains.txt
+          fi
+
       - name: Run probe
         # 探测时长由脚本内部 PROBE_TIME_LIMIT 控制（当前测试阶段 30s），
         # 程序自身优雅停止后进入收尾并退出，无需外部 timeout 强杀
@@ -41,5 +56,7 @@ jobs:
             echo "无变更，跳过提交"
           else
             git commit -m "chore: auto probe update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            # 先拉取远程变更再推送，避免非快进冲突
+            git pull --rebase --autostash
             git push
           fi
