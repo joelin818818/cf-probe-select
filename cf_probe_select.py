@@ -7,7 +7,9 @@ import re
 import socket
 import subprocess
 import sys
+import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from collections import deque, defaultdict
 from urllib.parse import unquote, urljoin, urlparse
 
@@ -150,6 +152,9 @@ MAX_SUBDOMAINS_PER_ROOT = 3
 # 单次运行最多新增的域名数（防止 2 分钟内无限扩散）
 MAX_NEW_PER_RUN = 200
 
+# 探测阶段时长上限（秒）—— 由程序自身计时优雅停止，而非外部 timeout 强杀
+PROBE_TIME_LIMIT = 30
+
 # 单页嗅探入队上限，防止巨型页把队列撑爆
 MAX_NEW_PER_PAGE = 50
 
@@ -208,7 +213,8 @@ def is_cloudflare_ip(ip_str: str) -> bool:
 
 
 def is_cloudflare_domain(domain: str) -> bool:
-    """检测域名是否走 Cloudflare CDN"""
+    """检测域名是否走 Cloudflare CDN（DNS/IP 段快速路径优先，HEAD 兜底）"""
+    # 快速路径：DNS 解析后看 IP 是否落在 Cloudflare 官方段（通常几十 ms）
     try:
         ip = socket.gethostbyname(domain)
         if is_cloudflare_ip(ip):
@@ -216,10 +222,11 @@ def is_cloudflare_domain(domain: str) -> bool:
     except Exception:
         pass
 
+    # 兜底：发 HEAD 看 Server 头（仅在 DNS 路径未命中时走，短超时）
     for schema in ("https://", "http://"):
         try:
             url = f"{schema}{domain}"
-            resp = requests.head(url, headers=HEADERS, timeout=4, allow_redirects=True)
+            resp = requests.head(url, headers=HEADERS, timeout=3, allow_redirects=True)
             if "cloudflare" in resp.headers.get("Server", "").lower():
                 return True
         except requests.RequestException:
@@ -287,6 +294,20 @@ def run_cf_explorer():
     saved, root_sub_count = load_existing_domains(OUTPUT_FILE)
     print(f"[*] 已载入 {len(saved)} 个已有域名")
 
+    start_time = time.time()
+
+    def _flush_all():
+        """全量写回：覆盖模式，保证探测阶段结束时数据落盘"""
+        try:
+            with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+                f.write("# CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积）\n")
+                f.write("# 由脚本自动更新，请勿手动编辑\n")
+                for d in sorted(saved):
+                    f.write(d + "\n")
+            print(f"[*] 已全量写回 {len(saved)} 个域名 -> {OUTPUT_FILE}")
+        except Exception as e:
+            print(f"[!] 写回失败: {e}")
+
     seeds = pick_seeds(saved)
 
     # 双队列：cf_q 优先级高（命中 CF 的第三方 / CF 官方），normal_q 兜底
@@ -311,56 +332,69 @@ def run_cf_explorer():
 
     print(f"[*] 结果保存路径: {os.path.abspath(OUTPUT_FILE)}\n" + "=" * 60)
 
-    def next_domain():
-        if cf_q:
-            return cf_q.popleft()
-        if normal_q:
-            return normal_q.popleft()
-        return None
-
-    while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
-        current = next_domain()
-        if current is None:
-            break
-        current = current.strip().lower()
-        if current in visited:
-            continue
-        visited.add(current)
-
-        root = get_registered_domain(current)
-        if root in non_cf_roots and current != root:
-            continue
-
-        print(f"[?] 检测: {current:<40}", end="", flush=True)
-
-        # 巨型科技站黑名单：直接跳过，不入库不扩散
-        if is_big_tech(current):
-            print(" -> [巨型站黑名单 跳过]")
-            continue
-
-        if is_cloudflare_own_domain(current):
-            print(" -> [CF官方域名 探索外链]")
-            _expand(current, enqueue, visited, non_cf_roots, priority=True)
-        elif current in saved:
-            print(" -> [已在记录中 跳过]")
-        elif is_cloudflare_domain(current):
-            if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
-                print(f" -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
+    def next_batch(n: int):
+        """从双队列取出最多 n 个未访问域名（CF 优先）"""
+        batch = []
+        while len(batch) < n and (cf_q or normal_q):
+            if cf_q:
+                d = cf_q.popleft()
             else:
-                print(" -> [命中 Cloudflare 第三方]")
-                saved.add(current)
-                root_sub_count[root] += 1
-                new_added += 1
-                with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
-                    f.write(current + "\n")
-                # 命中 CF 的第三方域名优先继续扩散，挖掘其同生态外链
-                _expand(current, enqueue, visited, non_cf_roots, priority=True)
-        else:
-            print(" -> [非 Cloudflare 跳过]")
-            if current == root:
-                non_cf_roots.add(root)
-            # 非 CF 域名不抓页面扩散，避免队列被巨型站淹没
+                d = normal_q.popleft()
+            d = d.strip().lower()
+            if d in visited:
+                continue
+            visited.add(d)
+            batch.append(d)
+        return batch
 
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
+            # 程序自身计时优雅停止：到时间则结束探测循环，进入收尾
+            if time.time() - start_time >= PROBE_TIME_LIMIT:
+                print(f"\n[*] 已达探测时长上限 {PROBE_TIME_LIMIT}s，停止探测，进入收尾...")
+                break
+
+            batch = next_batch(20)
+            if not batch:
+                break
+
+            # 并发检测整批域名是否走 Cloudflare
+            results = pool.map(is_cloudflare_domain, batch)
+
+            for current, is_cf in zip(batch, results):
+                root = get_registered_domain(current)
+                if root in non_cf_roots and current != root:
+                    continue
+
+                print(f"[?] 检测: {current:<40}", end="", flush=True)
+
+                # 巨型科技站黑名单：直接跳过，不入库不扩散
+                if is_big_tech(current):
+                    print(" -> [巨型站黑名单 跳过]")
+                    continue
+
+                if is_cloudflare_own_domain(current):
+                    print(" -> [CF官方域名 探索外链]")
+                    _expand(current, enqueue, visited, non_cf_roots, priority=True)
+                elif current in saved:
+                    print(" -> [已在记录中 跳过]")
+                elif is_cf:
+                    if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
+                        print(f" -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
+                    else:
+                        print(" -> [命中 Cloudflare 第三方]")
+                        saved.add(current)
+                        root_sub_count[root] += 1
+                        new_added += 1
+                        # 命中 CF 的第三方域名优先继续扩散，挖掘其同生态外链
+                        _expand(current, enqueue, visited, non_cf_roots, priority=True)
+                else:
+                    print(" -> [非 Cloudflare 跳过]")
+                    if current == root:
+                        non_cf_roots.add(root)
+                    # 非 CF 域名不抓页面扩散，避免队列被巨型站淹没
+
+    _flush_all()
     print("=" * 60)
     print(
         f"[!] 本轮结束：新增 {new_added} 个域名，文件总计 {len(saved)} 个"

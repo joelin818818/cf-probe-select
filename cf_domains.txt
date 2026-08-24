@@ -1,2 +1,4 @@
 # CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积）
-# 首次运行将从自举种子 cloudflare.com 开始探测
+# 由脚本自动更新，请勿手动编辑
+imagedelivery.net
+one.one.one.one

@@ -27,16 +27,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 tldextract
 
-      - name: Run probe (limit 30 seconds, testing)
-        # 测试阶段限制为 30 秒，超时自动终止，已写入的结果保留
-        run: timeout 30 python cf_probe_select.py
+      - name: Run probe
+        # 探测时长由脚本内部 PROBE_TIME_LIMIT 控制（当前测试阶段 30s），
+        # 程序自身优雅停止后进入收尾并退出，无需外部 timeout 强杀
+        run: python cf_probe_select.py
 
       - name: Commit and push results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add cf_domains.txt
-          if git diff --cached --quiet; then
+          if [ -z "$(git status --porcelain cf_domains.txt)" ]; then
             echo "无变更，跳过提交"
           else
             git commit -m "chore: auto probe update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
