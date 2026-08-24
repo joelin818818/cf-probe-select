@@ -320,7 +320,7 @@ function html() {
   <button id="start">开始测速</button>
   <button id="sort" class="ghost">按延迟排序</button>
   <button id="copyAll" class="ghost">复制全部（按延迟）</button>
-  <span class="status" id="info">点击「开始测速」对所有域名进行浏览器侧实时测速</span>
+  <span class="status" id="info">点击「开始测速」对每个域名测 3 轮取平均延迟</span>
 </div>
 
 <div class="wrap">
@@ -456,7 +456,7 @@ function sortFn(a, b) {
   return 0;
 }
 
-async function measure(domain) {
+async function measureOne(domain) {
   const t0 = performance.now();
   try {
     const ctrl = new AbortController();
@@ -468,13 +468,36 @@ async function measure(domain) {
       signal: ctrl.signal,
     });
     clearTimeout(timer);
-    return { domain, lat: Math.round(performance.now() - t0), status: "ok" };
+    return performance.now() - t0;
   } catch (e) {
-    if (e.name === "AbortError") {
-      return { domain, lat: TIMEOUT, status: "timeout" };
-    }
-    return { domain, lat: null, status: "err" };
+    if (e.name === "AbortError") return "timeout";
+    return "err";
   }
+}
+
+async function measure(domain) {
+  const ROUNDS = 3;
+  const times = [];
+  let hadTimeout = false;
+  let hadErr = false;
+  for (let i = 0; i < ROUNDS; i++) {
+    const r = await measureOne(domain);
+    if (typeof r === "number") {
+      times.push(r);
+    } else if (r === "timeout") {
+      hadTimeout = true;
+    } else {
+      hadErr = true;
+    }
+  }
+  if (times.length > 0) {
+    const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+    return { domain, lat: avg, status: "ok" };
+  }
+  if (hadTimeout) {
+    return { domain, lat: TIMEOUT, status: "timeout" };
+  }
+  return { domain, lat: null, status: "err" };
 }
 
 async function startTest() {
@@ -484,7 +507,7 @@ async function startTest() {
   results = [];
   let done = 0;
   info.textContent = "测速中… 0 / " + domains.length;
-  // 并发 8 个，逐批测速
+  // 并发 8 个，逐批测速，每域名测 3 轮取平均
   const CONC = 8;
   for (let i = 0; i < domains.length; i += CONC) {
     const batch = domains.slice(i, i + CONC);
@@ -496,9 +519,11 @@ async function startTest() {
   }
   testing = false;
   document.getElementById("start").disabled = false;
-  info.textContent = "完成 · 共 " + results.length + " 个 · 最快 " +
-    (results.find(r => r.status === "ok")?.domain || "无");
   sortMode = "lat";
+  const sorted = [...results].sort((a, b) => sortFn(a, b));
+  const fastest = sorted.find(r => r.status === "ok");
+  info.textContent = "完成 · 共 " + results.length + " 个 · 最快 " +
+    (fastest ? fastest.domain + " " + fastest.lat + "ms" : "无");
   render();
 }
 
