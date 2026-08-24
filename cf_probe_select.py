@@ -95,6 +95,7 @@ CF_OWN_ROOT_DOMAINS = {
 }
 
 # 巨型科技站黑名单（主域名）—— 走 CF 但非"冷门优选"目标，跳过不入库不扩散
+# 注意：CF 官方域名（cloudflare.com 等）不在此列，它们不入库但仍作为扩散矿源
 BIG_TECH_ROOTS = {
     "google.com", "googleapis.com", "gstatic.com", "youtube.com", "gmail.com",
     "googleblog.com", "googleusercontent.com",
@@ -107,8 +108,7 @@ BIG_TECH_ROOTS = {
     "amazon.com", "amazonaws.com", "cloudfront.net", "awsstatic.com", "twitch.tv",
     "twitter.com", "x.com", "t.co", "wordpress.com", "w.org", "wordpress.org",
     "wikipedia.org", "wikimedia.org", "mozilla.org", "mozilla.com", "firefox.com",
-    "cloudflare.com", "cloudflare.net", "cloudflarestatus.com", "workers.dev",
-    "pages.dev", "schema.org", "w3.org", "yahoo.com", "baidu.com", "qq.com",
+    "schema.org", "w3.org", "yahoo.com", "baidu.com", "qq.com",
     "tencent.com", "taobao.com", "aliyun.com", "alibabacloud.com", "jd.com",
     "bilibili.com", "weibo.com", "sina.com", "sohu.com", "netflix.com",
     "openai.com", "anthropic.com", "huggingface.co", "reddit.com", "pinterest.com",
