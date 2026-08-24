@@ -7,8 +7,13 @@ import re
 import socket
 import subprocess
 import sys
+import warnings
 from collections import deque, defaultdict
 from urllib.parse import unquote, urljoin, urlparse
+
+from bs4 import XMLParsedAsHTMLWarning
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # ==================== 1. 自动检测并安装依赖库 ====================
 REQUIRED_PACKAGES = {
@@ -89,6 +94,29 @@ CF_OWN_ROOT_DOMAINS = {
     "cf-ipfs.com",
 }
 
+# 巨型科技站黑名单（主域名）—— 走 CF 但非"冷门优选"目标，跳过不入库不扩散
+BIG_TECH_ROOTS = {
+    "google.com", "googleapis.com", "gstatic.com", "youtube.com", "gmail.com",
+    "googleblog.com", "googleusercontent.com",
+    "facebook.com", "fbcdn.net", "instagram.com", "whatsapp.com", "meta.com",
+    "messenger.com",
+    "microsoft.com", "windows.com", "windows.net", "azure.com", "azureedge.net",
+    "live.com", "bing.com", "office.com", "msn.com", "skype.com", "github.com",
+    "githubassets.com", "githubstatus.com", "githubusercontent.com", "github.io",
+    "github.blog", "gitlab.com", "linkedin.com", "apple.com", "icloud.com",
+    "amazon.com", "amazonaws.com", "cloudfront.net", "awsstatic.com", "twitch.tv",
+    "twitter.com", "x.com", "t.co", "wordpress.com", "w.org", "wordpress.org",
+    "wikipedia.org", "wikimedia.org", "mozilla.org", "mozilla.com", "firefox.com",
+    "cloudflare.com", "cloudflare.net", "cloudflarestatus.com", "workers.dev",
+    "pages.dev", "schema.org", "w3.org", "yahoo.com", "baidu.com", "qq.com",
+    "tencent.com", "taobao.com", "aliyun.com", "alibabacloud.com", "jd.com",
+    "bilibili.com", "weibo.com", "sina.com", "sohu.com", "netflix.com",
+    "openai.com", "anthropic.com", "huggingface.co", "reddit.com", "pinterest.com",
+    "tiktok.com", "bytefcdn.com", "shopify.com", "salesforce.com", "oracle.com",
+    "ibm.com", "adobe.com", "akamai.com", "akamaized.net", "fastly.net",
+    "cloudfront.cn",
+}
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -122,6 +150,9 @@ MAX_SUBDOMAINS_PER_ROOT = 3
 # 单次运行最多新增的域名数（防止 2 分钟内无限扩散）
 MAX_NEW_PER_RUN = 200
 
+# 单页嗅探入队上限，防止巨型页把队列撑爆
+MAX_NEW_PER_PAGE = 50
+
 IGNORE_EXTENSIONS = (
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".css", ".js",
     ".woff", ".woff2", ".ico", ".ttf", ".map",
@@ -132,8 +163,6 @@ def load_existing_domains(filepath: str):
     """载入本地已有域名（纯域名），并统计每个主域名的子域数量。
 
     返回 (saved_set, root_sub_count)
-      saved_set: 已记录的完整域名集合
-      root_sub_count: dict[主域名] -> 该主域下已记录的子域数量
     """
     saved = set()
     root_sub_count = defaultdict(int)
@@ -154,7 +183,6 @@ def load_existing_domains(filepath: str):
 
 
 def get_registered_domain(domain: str) -> str:
-    """提取根主域名（例如 blog.cloudflare.com -> cloudflare.com）"""
     extracted = tldextract.extract(domain)
     if extracted.suffix:
         return f"{extracted.domain}.{extracted.suffix}"
@@ -164,6 +192,11 @@ def get_registered_domain(domain: str) -> str:
 def is_cloudflare_own_domain(domain: str) -> bool:
     root = get_registered_domain(domain)
     return root in CF_OWN_ROOT_DOMAINS or "cloudflare" in domain.split(".")
+
+
+def is_big_tech(domain: str) -> bool:
+    root = get_registered_domain(domain)
+    return root in BIG_TECH_ROOTS
 
 
 def is_cloudflare_ip(ip_str: str) -> bool:
@@ -250,28 +283,27 @@ def pick_seeds(saved: set) -> list:
     return list(BOOTSTRAP_SEEDS)
 
 
-def rewrite_output_file(saved: set):
-    """把去重后的域名重写回输出文件（纯域名，每行一个）"""
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        for d in sorted(saved):
-            f.write(d + "\n")
-
-
 def run_cf_explorer():
     saved, root_sub_count = load_existing_domains(OUTPUT_FILE)
     print(f"[*] 已载入 {len(saved)} 个已有域名")
 
     seeds = pick_seeds(saved)
-    domain_queue = deque()
+
+    # 双队列：cf_q 优先级高（命中 CF 的第三方 / CF 官方），normal_q 兜底
+    cf_q = deque()
+    normal_q = deque()
+
+    def enqueue(domain: str, priority: bool = False):
+        domain = domain.strip().lower()
+        if "://" in domain:
+            domain = urlparse(domain).netloc.split(":")[0]
+        if priority:
+            cf_q.appendleft(domain)
+        else:
+            normal_q.append(domain)
+
     for s in seeds:
-        s = s.strip().lower()
-        if "://" in s:
-            s = urlparse(s).netloc.split(":")[0]
-        domain_queue.append(s)
-        root = get_registered_domain(s)
-        if root != s:
-            domain_queue.append(root)
-        domain_queue.append(f"www.{root}")
+        enqueue(s)
 
     visited = set()
     non_cf_roots = set()
@@ -279,8 +311,18 @@ def run_cf_explorer():
 
     print(f"[*] 结果保存路径: {os.path.abspath(OUTPUT_FILE)}\n" + "=" * 60)
 
-    while domain_queue and new_added < MAX_NEW_PER_RUN:
-        current = domain_queue.popleft().strip().lower()
+    def next_domain():
+        if cf_q:
+            return cf_q.popleft()
+        if normal_q:
+            return normal_q.popleft()
+        return None
+
+    while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
+        current = next_domain()
+        if current is None:
+            break
+        current = current.strip().lower()
         if current in visited:
             continue
         visited.add(current)
@@ -291,48 +333,62 @@ def run_cf_explorer():
 
         print(f"[?] 检测: {current:<40}", end="", flush=True)
 
+        # 巨型科技站黑名单：直接跳过，不入库不扩散
+        if is_big_tech(current):
+            print(" -> [巨型站黑名单 跳过]")
+            continue
+
         if is_cloudflare_own_domain(current):
-            print(" -> [CF官方域名 仅探索外链]")
+            print(" -> [CF官方域名 探索外链]")
+            _expand(current, enqueue, visited, non_cf_roots, priority=True)
         elif current in saved:
             print(" -> [已在记录中 跳过]")
         elif is_cloudflare_domain(current):
-            # 主域聚合：同一主域最多 MAX_SUBDOMAINS_PER_ROOT 个子域
             if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
                 print(f" -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
             else:
-                print(" -> [命中 Cloudflare]")
+                print(" -> [命中 Cloudflare 第三方]")
                 saved.add(current)
                 root_sub_count[root] += 1
                 new_added += 1
-                # 边探测边落盘，2 分钟超时中断也不丢数据
                 with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
                     f.write(current + "\n")
+                # 命中 CF 的第三方域名优先继续扩散，挖掘其同生态外链
+                _expand(current, enqueue, visited, non_cf_roots, priority=True)
         else:
             print(" -> [非 Cloudflare 跳过]")
             if current == root:
                 non_cf_roots.add(root)
-
-        # 抓取页面继续向下扩散
-        for schema in ("https://", "http://"):
-            try:
-                target_url = f"{schema}{current}"
-                response = requests.get(target_url, headers=HEADERS, timeout=6)
-                if response.text and len(response.text) > 100:
-                    new_domains = extract_all_domains_deep(response.text, target_url)
-                    added = 0
-                    for nd in new_domains:
-                        nd_root = get_registered_domain(nd)
-                        if nd not in visited and nd_root not in non_cf_roots:
-                            domain_queue.append(nd)
-                            added += 1
-                    if added:
-                        print(f"    └─ [+] 嗅探出 {added} 个新域名入队")
-                    break
-            except Exception:
-                continue
+            # 非 CF 域名不抓页面扩散，避免队列被巨型站淹没
 
     print("=" * 60)
-    print(f"[!] 本轮结束：新增 {new_added} 个域名，文件总计 {len(saved)} 个（已过滤 CF 官方域名，主域≤{MAX_SUBDOMAINS_PER_ROOT}）")
+    print(
+        f"[!] 本轮结束：新增 {new_added} 个域名，文件总计 {len(saved)} 个"
+        f"（已过滤 CF 官方/巨型站，主域≤{MAX_SUBDOMAINS_PER_ROOT}）"
+    )
+
+
+def _expand(current, enqueue, visited, non_cf_roots, priority: bool = False):
+    """抓取当前页面，嗅探外链入队（单页上限 MAX_NEW_PER_PAGE）"""
+    for schema in ("https://", "http://"):
+        try:
+            target_url = f"{schema}{current}"
+            response = requests.get(target_url, headers=HEADERS, timeout=6)
+            if response.text and len(response.text) > 100:
+                new_domains = extract_all_domains_deep(response.text, target_url)
+                added = 0
+                for nd in new_domains:
+                    if added >= MAX_NEW_PER_PAGE:
+                        break
+                    nd_root = get_registered_domain(nd)
+                    if nd not in visited and nd_root not in non_cf_roots:
+                        enqueue(nd, priority=priority)
+                        added += 1
+                if added:
+                    print(f"    └─ [+] 嗅探出 {added} 个新域名入队")
+                break
+        except Exception:
+            continue
 
 
 if __name__ == "__main__":
