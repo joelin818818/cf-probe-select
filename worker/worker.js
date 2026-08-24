@@ -69,10 +69,9 @@ export default {
       }
 
       if (path === "/api/domains") {
-        const res = await fetch(RAW_DOMAINS_URL, {
-          cf: { cacheTtl: 0 },
-          cache: "no-store",
-        });
+        // 加时间戳绕过 raw.githubusercontent.com CDN 缓存，确保实时
+        const nocacheUrl = RAW_DOMAINS_URL + "?t=" + Date.now();
+        const res = await fetch(nocacheUrl, { cf: { cacheTtl: 0 } });
         if (!res.ok) {
           return json({ error: "无法读取域名列表", status: res.status }, 502);
         }
@@ -82,7 +81,11 @@ export default {
           .map((l) => l.trim())
           .filter((l) => l && !l.startsWith("#"))
           .map((l) => l.split("#")[0].trim().toLowerCase());
-        return json({ count: domains.length, domains });
+        return json(
+          { count: domains.length, domains },
+          200,
+          { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" }
+        );
       }
 
       if (path === "/api/resolve") {
@@ -235,10 +238,13 @@ async function fetchIpLocation(ip) {
   }
 }
 
-function json(data, status = 200) {
+function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8" },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      ...extraHeaders,
+    },
   });
 }
 
