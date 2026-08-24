@@ -8,6 +8,7 @@ cdn-client.medium.com
 cdn.confiant-integrations.net
 cdn.optimizely.com
 cdn.prod.website-files.com
+chatgpt.com
 dashboard.freestar.io
 developer.vimeo.com
 example.com
