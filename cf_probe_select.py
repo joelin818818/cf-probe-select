@@ -109,7 +109,6 @@ def load_cf_ip_ranges(timeout: int = 10):
 CF_IP_RANGES = load_cf_ip_ranges()
 
 # Cloudflare 官方自有根域名（仅用于探索外链，不写入最终 txt）
-# 注：one.one.one.one 经 tldextract 解析后 registered domain 为 one.one
 CF_OWN_ROOT_DOMAINS = {
     "cloudflare.com",
     "cloudflare.net",
@@ -128,8 +127,7 @@ CF_OWN_ROOT_DOMAINS = {
     "cf-ipfs.com",
 }
 
-# 巨型科技站黑名单（主域名）—— 走 CF 但非"冷门优选"目标，仅作矿源：不入库但允许扩散其外链
-# 注意：CF 官方域名（cloudflare.com 等）不在此列，它们不入库但仍作为扩散矿源
+# 巨型科技站黑名单（主域名）—— 走 CF 但非"冷门优选"目标，仅作矿源
 BIG_TECH_ROOTS = {
     "google.com", "googleapis.com", "gstatic.com", "youtube.com", "gmail.com",
     "googleblog.com", "googleusercontent.com",
@@ -171,23 +169,11 @@ HEADERS = {
 }
 
 OUTPUT_FILE = "cf_domains.txt"
-
-# 自举种子：仅在历史文件为空时使用（cloudflare.com 外链极多，是天然域名矿）
 BOOTSTRAP_SEEDS = ["cloudflare.com"]
-
-# 每次运行随机抽取的历史域名数量作为本轮种子
 SEED_SAMPLE_SIZE = 5
-
-# 同一主域名最多保留的子域名数量
 MAX_SUBDOMAINS_PER_ROOT = 3
-
-# 单次运行最多新增的域名数（防止 2 分钟内无限扩散）
 MAX_NEW_PER_RUN = 200
-
-# 探测阶段时长上限（秒），由程序自身计时优雅停止
 PROBE_TIME_LIMIT = 600
-
-# 单页嗅探入队上限，防止巨型页把队列撑爆
 MAX_NEW_PER_PAGE = 50
 
 IGNORE_EXTENSIONS = (
@@ -197,10 +183,6 @@ IGNORE_EXTENSIONS = (
 
 
 def load_existing_domains(filepath: str):
-    """载入本地已有域名（纯域名），并统计每个主域名的子域数量。
-
-    返回 (saved_set, root_sub_count)
-    """
     saved = set()
     root_sub_count = defaultdict(int)
     if os.path.exists(filepath):
@@ -246,7 +228,6 @@ def is_big_tech(domain: str) -> bool:
 def is_cloudflare_ip(ip_str: str) -> bool:
     try:
         ip_obj = ipaddress.ip_address(ip_str)
-        # 只检查 IPv4
         if not isinstance(ip_obj, ipaddress.IPv4Address):
             return False
         return any(ip_obj in network for network in CF_IP_RANGES)
@@ -255,9 +236,7 @@ def is_cloudflare_ip(ip_str: str) -> bool:
 
 
 def resolve_ips(domain: str) -> list:
-    """解析域名 A 记录，返回前几个 IPv4 地址。"""
     try:
-        # socket.getaddrinfo 可返回多个 A 记录
         infos = socket.getaddrinfo(domain, None, socket.AF_INET)
         ips = []
         seen = set()
@@ -272,9 +251,7 @@ def resolve_ips(domain: str) -> list:
 
 
 def _build_dns_query(domain: str) -> bytes:
-    """构造极简 DNS 查询包（标准 UDP 53，查询 A 记录）。"""
     import struct
-
     txn_id = 0x1234
     flags = 0x0100
     header = struct.pack(">HHHHHH", txn_id, flags, 1, 0, 0, 0)
@@ -287,9 +264,7 @@ def _build_dns_query(domain: str) -> bytes:
 
 
 def _parse_dns_a_records(resp: bytes) -> list:
-    """解析 DNS 响应，提取 A 记录 IPv4。"""
     import struct
-
     try:
         _, _, qd, an = struct.unpack(">HHHH", resp[:12])
         off = 12
@@ -317,7 +292,6 @@ def _parse_dns_a_records(resp: bytes) -> list:
 
 
 def resolve_via_udp_dns(domain: str, server: str, timeout: int = 5) -> list:
-    """标准 UDP 53 解析 A 记录。"""
     try:
         query = _build_dns_query(domain)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -330,7 +304,6 @@ def resolve_via_udp_dns(domain: str, server: str, timeout: int = 5) -> list:
 
 
 def resolve_via_doh(domain: str, base_url: str, timeout: int = 5) -> list:
-    """DoH（DNS-over-HTTPS）解析 A 记录。"""
     try:
         url = base_url + "?name=" + domain + "&type=A"
         r = requests.get(url, headers={"Accept": "application/dns-json"}, timeout=timeout)
@@ -339,18 +312,19 @@ def resolve_via_doh(domain: str, base_url: str, timeout: int = 5) -> list:
         data = r.json()
         ips = []
         for a in data.get("Answer", []):
-            if a.get("type") == 1:  # A 记录
+            if a.get("type") == 1:
                 ips.append(a["data"])
         return ips
     except Exception:
         return []
 
 
-# 多地区/多源解析器：系统 DNS + 国内 UDP + 国内/全球 DoH
+# ==================== 修改点 1 ====================
+# 多地区/多源解析器：系统 DNS + 国内 DoH (字节/360/腾讯) + 全球 DoH (Google/Cloudflare)
 DNS_RESOLVERS = [
     ("system", "udp", None),
-    ("cnnic-1.2.4.8", "udp", "1.2.4.8"),
-    ("aliyun-doh", "doh", "https://dns.alidns.com/dns-query"),
+    ("volcengine-doh", "doh", "https://minidns.volcengineapi.com/dns-query"),
+    ("360-doh", "doh", "https://doh.360.cn/dns-query"),
     ("tencent-doh", "doh", "https://doh.pub/dns-query"),
     ("google-doh", "doh", "https://dns.google/resolve"),
     ("cloudflare-doh", "doh", "https://cloudflare-dns.com/dns-query"),
@@ -358,7 +332,6 @@ DNS_RESOLVERS = [
 
 
 def resolve_ips_multi(domain: str) -> dict:
-    """多源并发解析，返回 {源名: [ip...]}。"""
     def _one(item):
         name, kind, srv = item
         if kind == "udp":
@@ -373,14 +346,11 @@ def resolve_ips_multi(domain: str) -> dict:
 
 
 def is_cloudflare_domain(domain: str) -> bool:
-    """检测域名是否走 Cloudflare CDN：先查多个 IP，任一命中 CF 段即保留；否则 HEAD 兜底"""
-    # 快速路径：解析所有 A 记录，任一 IP 命中 CF 官方段即认为走 CF
     ips = resolve_ips(domain)
     for ip in ips:
         if is_cloudflare_ip(ip):
             return True
 
-    # 兜底：发 HEAD 看 Server 头（仅在 DNS 路径未命中时走，短超时）
     for schema in ("https://", "http://"):
         try:
             url = f"{schema}{domain}"
@@ -393,28 +363,37 @@ def is_cloudflare_domain(domain: str) -> bool:
 
 
 def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
-    """落盘前最终过滤（硬标准：所有解析源都必须落在 Cloudflare 段）。
-
-    多地区/多源并发解析（系统 DNS + 1.2.4.8 + 阿里/腾讯/Google/Cloudflare DoH）。
-    严格交集判定：只要任一源返回的 IP 里有不在 CF 段的，即删除；
-    只有所有源都落在 CF 段才保留。不认 Server 头，与前端展示逻辑一致。
-    """
     if not saved:
         return
     domains = sorted(saved)
     print(f"[*] 落盘前 CF IP 校验（多源严格交集，并发）: 共 {len(domains)} 个域名")
 
+    # ==================== 修改点 2 ====================
     def check(domain):
         sources = resolve_ips_multi(domain)
         non_cf_sources = []
+        successful_nodes = 0  # 记录成功解析的节点数量
+
         for name, ips in sources.items():
             if not ips:
-                non_cf_sources.append(f"{name}=解析失败")
+                # 忽略解析失败（超时/丢包）的节点，不作为否决条件
                 continue
+            
+            successful_nodes += 1
+            
+            # 只要解析成功的节点，其返回的 IP 必须有命中 CF 段的
             if not any(is_cloudflare_ip(ip) for ip in ips):
                 non_cf_sources.append(f"{name}={','.join(ips)}")
+
+        # 如果所有节点都解析失败，说明域名失效或网络严重阻断
+        if successful_nodes == 0:
+            return (domain, False, "所有 DNS 节点均解析失败")
+
+        # 如果有任何一个成功的节点解析出了非 CF 的 IP，则剔除
         if non_cf_sources:
             return (domain, False, "; ".join(non_cf_sources))
+
+        # 正常通过校验：至少有一个节点解析成功，且成功节点都命中了 CF 段
         union = []
         seen = set()
         for ips in sources.values():
@@ -445,9 +424,7 @@ def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
 
 
 def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
-    """深度全文本嗅探提取域名"""
     domains = set()
-
     clean_text = html.unescape(raw_content)
     clean_text = unquote(clean_text)
     clean_text = clean_text.replace(r"\/", "/")
@@ -491,7 +468,6 @@ def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
 
 
 def pick_seeds(saved: set) -> list:
-    """选择本轮种子：有历史则随机抽，否则用自举种子"""
     if saved:
         sample = random.sample(sorted(saved), min(SEED_SAMPLE_SIZE, len(saved)))
         print(f"[*] 从已有 {len(saved)} 个域名中随机抽 {len(sample)} 个作为本轮种子")
@@ -507,7 +483,6 @@ def run_cf_explorer():
     start_time = time.time()
 
     def _flush_all():
-        """全量写回：先过一遍 CF IP 校验，删除非 CF 域名，再落盘"""
         filter_non_cf_domains(saved, root_sub_count)
         try:
             with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
@@ -521,7 +496,6 @@ def run_cf_explorer():
 
     seeds = pick_seeds(saved)
 
-    # 双队列：cf_q 优先级高（命中 CF 的第三方 / CF 官方），normal_q 兜底
     cf_q = deque()
     normal_q = deque()
 
@@ -544,7 +518,6 @@ def run_cf_explorer():
     print(f"[*] 结果保存路径: {os.path.abspath(OUTPUT_FILE)}\n" + "=" * 60)
 
     def next_batch(n: int):
-        """从双队列取出最多 n 个未访问域名（CF 优先）"""
         batch = []
         while len(batch) < n and (cf_q or normal_q):
             if cf_q:
@@ -560,7 +533,6 @@ def run_cf_explorer():
 
     with ThreadPoolExecutor(max_workers=10) as pool:
         while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
-            # 达到时长上限则停止探测，进入收尾
             if time.time() - start_time >= PROBE_TIME_LIMIT:
                 print(f"\n[*] 已达探测时长上限 {PROBE_TIME_LIMIT}s，停止探测，进入收尾...")
                 break
@@ -569,7 +541,6 @@ def run_cf_explorer():
             if not batch:
                 break
 
-            # 并发检测整批域名是否走 Cloudflare
             results = pool.map(is_cloudflare_domain, batch)
 
             for current, is_cf in zip(batch, results):
@@ -579,7 +550,6 @@ def run_cf_explorer():
 
                 print(f"[?] 检测: {current:<40}", end="", flush=True)
 
-                # 巨型科技站黑名单：不入库，但允许抓取其页面外链作为矿源继续扩散
                 if is_big_tech(current):
                     print(" -> [巨型站 不入库但扩散外链]")
                     _expand(current, enqueue, visited, non_cf_roots, priority=False)
@@ -589,7 +559,6 @@ def run_cf_explorer():
                     print(" -> [CF官方域名 探索外链]")
                     _expand(current, enqueue, visited, non_cf_roots, priority=True)
                 elif current in saved:
-                    # 已记录的域名不再入库，但仍抓取页面外链以发现新域名（矿源）
                     print(" -> [已在记录中 仅扩散外链]")
                     _expand(current, enqueue, visited, non_cf_roots, priority=is_cf)
                 elif is_cf:
@@ -600,13 +569,11 @@ def run_cf_explorer():
                         saved.add(current)
                         root_sub_count[root] += 1
                         new_added += 1
-                        # 命中 CF 的第三方域名优先继续扩散，挖掘其同生态外链
                         _expand(current, enqueue, visited, non_cf_roots, priority=True)
                 else:
                     print(" -> [非 Cloudflare 跳过]")
                     if current == root:
                         non_cf_roots.add(root)
-                    # 非 CF 域名不抓页面扩散，避免队列被巨型站淹没
 
     _flush_all()
     print("=" * 60)
@@ -617,7 +584,6 @@ def run_cf_explorer():
 
 
 def _expand(current, enqueue, visited, non_cf_roots, priority: bool = False):
-    """抓取当前页面，嗅探外链入队（单页上限 MAX_NEW_PER_PAGE）"""
     for schema in ("https://", "http://"):
         try:
             target_url = f"{schema}{current}"
