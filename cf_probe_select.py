@@ -271,6 +271,107 @@ def resolve_ips(domain: str) -> list:
         return []
 
 
+def _build_dns_query(domain: str) -> bytes:
+    """构造极简 DNS 查询包（标准 UDP 53，查询 A 记录）。"""
+    import struct
+
+    txn_id = 0x1234
+    flags = 0x0100
+    header = struct.pack(">HHHHHH", txn_id, flags, 1, 0, 0, 0)
+    qname = b""
+    for part in domain.split("."):
+        qname += bytes([len(part)]) + part.encode("ascii")
+    qname += b"\x00"
+    question = qname + struct.pack(">HH", 1, 1)
+    return header + question
+
+
+def _parse_dns_a_records(resp: bytes) -> list:
+    """解析 DNS 响应，提取 A 记录 IPv4。"""
+    import struct
+
+    try:
+        _, _, qd, an = struct.unpack(">HHHH", resp[:12])
+        off = 12
+        for _ in range(qd):
+            while resp[off] != 0:
+                off += resp[off] + 1
+            off += 1
+            off += 4
+        ips = []
+        for _ in range(an):
+            if resp[off] & 0xC0 == 0xC0:
+                off += 2
+            else:
+                while resp[off] != 0:
+                    off += resp[off] + 1
+                off += 1
+            rtype, _, _, rdlen = struct.unpack(">HHIH", resp[off:off + 10])
+            off += 10
+            if rtype == 1 and rdlen == 4:
+                ips.append(".".join(str(b) for b in resp[off:off + 4]))
+            off += rdlen
+        return ips
+    except Exception:
+        return []
+
+
+def resolve_via_udp_dns(domain: str, server: str, timeout: int = 5) -> list:
+    """标准 UDP 53 解析 A 记录。"""
+    try:
+        query = _build_dns_query(domain)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            s.sendto(query, (server, 53))
+            resp, _ = s.recvfrom(4096)
+        return _parse_dns_a_records(resp)
+    except Exception:
+        return []
+
+
+def resolve_via_doh(domain: str, base_url: str, timeout: int = 5) -> list:
+    """DoH（DNS-over-HTTPS）解析 A 记录。"""
+    try:
+        url = base_url + "?name=" + domain + "&type=A"
+        r = requests.get(url, headers={"Accept": "application/dns-json"}, timeout=timeout)
+        if not r.ok:
+            return []
+        data = r.json()
+        ips = []
+        for a in data.get("Answer", []):
+            if a.get("type") == 1:  # A 记录
+                ips.append(a["data"])
+        return ips
+    except Exception:
+        return []
+
+
+# 多地区/多源解析器：系统 DNS + 国内 UDP + 国内/全球 DoH
+DNS_RESOLVERS = [
+    ("system", "udp", None),
+    ("cnnic-1.2.4.8", "udp", "1.2.4.8"),
+    ("aliyun-doh", "doh", "https://dns.alidns.com/dns-query"),
+    ("tencent-doh", "doh", "https://doh.pub/dns-query"),
+    ("google-doh", "doh", "https://dns.google/resolve"),
+    ("cloudflare-doh", "doh", "https://cloudflare-dns.com/dns-query"),
+]
+
+
+def resolve_ips_multi(domain: str) -> dict:
+    """多源并发解析，返回 {源名: [ip...]}。"""
+    def _one(item):
+        name, kind, srv = item
+        if kind == "udp":
+            return (name, resolve_via_udp_dns(domain, srv) if srv else resolve_ips(domain))
+        return (name, resolve_via_doh(domain, srv))
+
+    result = {}
+    with ThreadPoolExecutor(max_workers=len(DNS_RESOLVERS)) as ex:
+        for name, ips in ex.map(_one, DNS_RESOLVERS):
+            result[name] = ips
+    return result
+
+
 def is_cloudflare_domain(domain: str) -> bool:
     """检测域名是否走 Cloudflare CDN：先查多个 IP，任一命中 CF 段即保留；否则 HEAD 兜底"""
     # 快速路径：解析所有 A 记录，任一 IP 命中 CF 官方段即认为走 CF
@@ -292,23 +393,36 @@ def is_cloudflare_domain(domain: str) -> bool:
 
 
 def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
-    """落盘前最终过滤（硬标准：解析出的 IP 必须落在 Cloudflare 段）。
+    """落盘前最终过滤（硬标准：所有解析源都必须落在 Cloudflare 段）。
 
-    只用 IP 段判定，不认 Server 头——与前端展示逻辑一致。
-    多线程并发解析 + 判定，加速收尾。
+    多地区/多源并发解析（系统 DNS + 1.2.4.8 + 阿里/腾讯/Google/Cloudflare DoH）。
+    严格交集判定：只要任一源返回的 IP 里有不在 CF 段的，即删除；
+    只有所有源都落在 CF 段才保留。不认 Server 头，与前端展示逻辑一致。
     """
     if not saved:
         return
     domains = sorted(saved)
-    print(f"[*] 落盘前 CF IP 校验（仅认 IP 段，并发）: 共 {len(domains)} 个域名")
+    print(f"[*] 落盘前 CF IP 校验（多源严格交集，并发）: 共 {len(domains)} 个域名")
 
     def check(domain):
-        ips = resolve_ips(domain)
-        if not ips:
-            return (domain, False, "解析失败")
-        if any(is_cloudflare_ip(ip) for ip in ips):
-            return (domain, True, ",".join(ips))
-        return (domain, False, ",".join(ips))
+        sources = resolve_ips_multi(domain)
+        non_cf_sources = []
+        for name, ips in sources.items():
+            if not ips:
+                non_cf_sources.append(f"{name}=解析失败")
+                continue
+            if not any(is_cloudflare_ip(ip) for ip in ips):
+                non_cf_sources.append(f"{name}={','.join(ips)}")
+        if non_cf_sources:
+            return (domain, False, "; ".join(non_cf_sources))
+        union = []
+        seen = set()
+        for ips in sources.values():
+            for ip in ips:
+                if ip not in seen:
+                    seen.add(ip)
+                    union.append(ip)
+        return (domain, True, ",".join(union))
 
     removed = []
     with ThreadPoolExecutor(max_workers=10) as pool:
@@ -317,7 +431,7 @@ def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
                 print(f"    [✓] {domain:<45} {detail}")
             else:
                 removed.append(domain)
-                print(f"    [-] {domain:<45} 非 CF IP {detail}，移除")
+                print(f"    [-] {domain:<45} 非 CF: {detail}，移除")
 
     if removed:
         for d in removed:
