@@ -1,3 +1,17 @@
 # CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积）
 # 由脚本自动更新，请勿手动编辑
-
+cdn.jsdelivr.net
+cdn.prod.website-files.com
+example.com
+geolocation.onetrust.com
+imagedelivery.net
+maxcdn.bootstrapcdn.com
+one.one.one.one
+soitron.com.tr
+sysnect.co.th
+tailwindcss.com
+wp-rocket.me
+www.soitron.com.tr
+www.soitrongroup.com
+wwwcloudflare.cloudflareaccess.com
+yoast.com
