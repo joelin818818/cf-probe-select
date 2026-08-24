@@ -5,11 +5,9 @@ __pycache__/
 .venv/
 venv/
 
-# 运行时生成的输出文件
-cf_domains.txt
-cf_domains_ranked.txt
-
 # 系统/编辑器
 .DS_Store
 .idea/
 .vscode/
+
+# 注意：cf_domains.txt 需纳入版本控制（探测结果回推仓库），不再忽略

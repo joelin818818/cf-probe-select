@@ -1,0 +1,44 @@
+name: CF Probe Select
+
+on:
+  schedule:
+    # 每天 UTC 00:00 运行（北京时间 08:00）
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 tldextract
+
+      - name: Run probe (limit 2 minutes)
+        # timeout 确保每次探测最多 2 分钟，超时自动终止，已写入的结果保留
+        run: timeout 120 python cf_probe_select.py
+
+      - name: Commit and push results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cf_domains.txt
+          if git diff --cached --quiet; then
+            echo "无变更，跳过提交"
+          else
+            git commit -m "chore: auto probe update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push
+          fi

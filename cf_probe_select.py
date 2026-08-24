@@ -2,11 +2,12 @@ import html
 import importlib
 import ipaddress
 import os
+import random
 import re
 import socket
 import subprocess
 import sys
-from collections import deque
+from collections import deque, defaultdict
 from urllib.parse import unquote, urljoin, urlparse
 
 # ==================== 1. 自动检测并安装依赖库 ====================
@@ -41,10 +42,10 @@ def ensure_dependencies():
                 subprocess.check_call(
                     cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
-                print(f"[✓] [{package}] 安装成功！")
+                print(f"[+] [{package}] 安装成功")
             except subprocess.CalledProcessError:
                 subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-        print("[*] 依赖库就绪，立即启动！\n" + "=" * 60)
+        print("[*] 依赖库就绪\n" + "=" * 60)
 
 
 ensure_dependencies()
@@ -109,37 +110,47 @@ HEADERS = {
 
 OUTPUT_FILE = "cf_domains.txt"
 
+# 自举种子：仅在历史文件为空时使用（cloudflare.com 外链极多，是天然域名矿）
+BOOTSTRAP_SEEDS = ["cloudflare.com"]
+
+# 每次运行随机抽取的历史域名数量作为本轮种子
+SEED_SAMPLE_SIZE = 5
+
+# 同一主域名最多保留的子域名数量
+MAX_SUBDOMAINS_PER_ROOT = 3
+
+# 单次运行最多新增的域名数（防止 2 分钟内无限扩散）
+MAX_NEW_PER_RUN = 200
+
 IGNORE_EXTENSIONS = (
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".svg",
-    ".css",
-    ".js",
-    ".woff",
-    ".woff2",
-    ".ico",
-    ".ttf",
-    ".map",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".css", ".js",
+    ".woff", ".woff2", ".ico", ".ttf", ".map",
 )
 
 
-def load_existing_saved_domains(filepath: str) -> set:
-    """载入本地已有域名，防止跨运行重复"""
+def load_existing_domains(filepath: str):
+    """载入本地已有域名（纯域名），并统计每个主域名的子域数量。
+
+    返回 (saved_set, root_sub_count)
+      saved_set: 已记录的完整域名集合
+      root_sub_count: dict[主域名] -> 该主域下已记录的子域数量
+    """
     saved = set()
+    root_sub_count = defaultdict(int)
     if os.path.exists(filepath):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if line and not line.startswith("#"):
-                        domain_part = line.split("#")[0].strip().lower()
-                        if domain_part:
-                            saved.add(domain_part)
+                    if not line or line.startswith("#"):
+                        continue
+                    domain = line.split("#")[0].strip().lower()
+                    if domain:
+                        saved.add(domain)
+                        root_sub_count[get_registered_domain(domain)] += 1
         except Exception:
             pass
-    return saved
+    return saved, root_sub_count
 
 
 def get_registered_domain(domain: str) -> str:
@@ -151,13 +162,11 @@ def get_registered_domain(domain: str) -> str:
 
 
 def is_cloudflare_own_domain(domain: str) -> bool:
-    """判断是否为 Cloudflare 官方自有资产域名"""
     root = get_registered_domain(domain)
     return root in CF_OWN_ROOT_DOMAINS or "cloudflare" in domain.split(".")
 
 
 def is_cloudflare_ip(ip_str: str) -> bool:
-    """判断 IP 是否属于 Cloudflare 官方 IP 段"""
     try:
         ip_obj = ipaddress.ip_address(ip_str)
         return any(ip_obj in network for network in CF_IP_RANGES)
@@ -174,17 +183,14 @@ def is_cloudflare_domain(domain: str) -> bool:
     except Exception:
         pass
 
-    for schema in ["https://", "http://"]:
+    for schema in ("https://", "http://"):
         try:
             url = f"{schema}{domain}"
-            resp = requests.head(
-                url, headers=HEADERS, timeout=4, allow_redirects=True
-            )
+            resp = requests.head(url, headers=HEADERS, timeout=4, allow_redirects=True)
             if "cloudflare" in resp.headers.get("Server", "").lower():
                 return True
         except requests.RequestException:
             continue
-
     return False
 
 
@@ -196,19 +202,15 @@ def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
     clean_text = unquote(clean_text)
     clean_text = clean_text.replace(r"\/", "/")
 
-    # HTML 标签解析
     try:
         soup = BeautifulSoup(clean_text, "html.parser")
         for tag in soup.find_all(["a", "link", "script", "iframe"], href=True):
             href = tag.get("href", "").strip()
-            if href and not href.startswith(
-                ("javascript:", "mailto:", "tel:", "#")
-            ):
+            if href and not href.startswith(("javascript:", "mailto:", "tel:", "#")):
                 full_url = urljoin(base_url, href)
                 host = urlparse(full_url).netloc.split(":")[0].strip().lower()
                 if host:
                     domains.add(host)
-
         for tag in soup.find_all(["script", "img", "iframe"], src=True):
             src = tag.get("src", "").strip()
             if src:
@@ -219,7 +221,6 @@ def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
     except Exception:
         pass
 
-    # 强力 URL 正则匹配
     url_pattern = re.findall(
         r'(?:https?:)?//([a-zA-Z0-9.-]+\.[a-zA-Z]{2,63})', clean_text
     )
@@ -227,7 +228,7 @@ def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
         host = host.split("/")[0].split(":")[0].strip().lower()
         domains.add(host)
 
-    valid_domains = set()
+    valid = set()
     for d in domains:
         d = d.strip(".'\"/ ")
         if not d or d.endswith(IGNORE_EXTENSIONS):
@@ -235,112 +236,107 @@ def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
         if re.match(r"^\d+\.\d+\.\d+\.\d+$", d):
             continue
         if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,20}$", d):
-            valid_domains.add(d.lower())
+            valid.add(d.lower())
+    return valid
 
-    return valid_domains
+
+def pick_seeds(saved: set) -> list:
+    """选择本轮种子：有历史则随机抽，否则用自举种子"""
+    if saved:
+        sample = random.sample(sorted(saved), min(SEED_SAMPLE_SIZE, len(saved)))
+        print(f"[*] 从已有 {len(saved)} 个域名中随机抽 {len(sample)} 个作为本轮种子")
+        return sample
+    print(f"[*] 历史为空，使用自举种子: {BOOTSTRAP_SEEDS}")
+    return list(BOOTSTRAP_SEEDS)
 
 
-def run_cf_explorer(seed_domain: str, max_limit: int = 50):
-    """主探索逻辑"""
-    if "://" in seed_domain:
-        seed_domain = urlparse(seed_domain).netloc.split(":")[0]
-    seed_domain = seed_domain.strip().lower()
+def rewrite_output_file(saved: set):
+    """把去重后的域名重写回输出文件（纯域名，每行一个）"""
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        for d in sorted(saved):
+            f.write(d + "\n")
 
-    saved_cf_domains = load_existing_saved_domains(OUTPUT_FILE)
-    if saved_cf_domains:
-        print(f"[*] 已载入 {len(saved_cf_domains)} 个已有域名（自动开启防重复）")
 
-    domain_queue = deque([seed_domain])
-    root_seed = get_registered_domain(seed_domain)
-    if root_seed != seed_domain:
-        domain_queue.append(root_seed)
-        domain_queue.append(f"www.{root_seed}")
-    else:
-        domain_queue.append(f"www.{root_seed}")
+def run_cf_explorer():
+    saved, root_sub_count = load_existing_domains(OUTPUT_FILE)
+    print(f"[*] 已载入 {len(saved)} 个已有域名")
 
-    visited_domains = set()
-    non_cf_root_domains = set()
+    seeds = pick_seeds(saved)
+    domain_queue = deque()
+    for s in seeds:
+        s = s.strip().lower()
+        if "://" in s:
+            s = urlparse(s).netloc.split(":")[0]
+        domain_queue.append(s)
+        root = get_registered_domain(s)
+        if root != s:
+            domain_queue.append(root)
+        domain_queue.append(f"www.{root}")
 
-    print(f"[*] 起始探索目标: {seed_domain}")
+    visited = set()
+    non_cf_roots = set()
+    new_added = 0
+
     print(f"[*] 结果保存路径: {os.path.abspath(OUTPUT_FILE)}\n" + "=" * 60)
 
-    new_added_count = 0
-
-    while domain_queue and new_added_count < max_limit:
-        current_domain = domain_queue.popleft().strip().lower()
-
-        if current_domain in visited_domains:
+    while domain_queue and new_added < MAX_NEW_PER_RUN:
+        current = domain_queue.popleft().strip().lower()
+        if current in visited:
             continue
-        visited_domains.add(current_domain)
+        visited.add(current)
 
-        root_domain = get_registered_domain(current_domain)
-        if root_domain in non_cf_root_domains and current_domain != root_domain:
+        root = get_registered_domain(current)
+        if root in non_cf_roots and current != root:
             continue
 
-        print(f"[?] 正在检测: {current_domain:<38}", end="", flush=True)
+        print(f"[?] 检测: {current:<40}", end="", flush=True)
 
-        # 1. 如果是 Cloudflare 官方资产：仅探索外链，不写入文件
-        if is_cloudflare_own_domain(current_domain):
-            print(" -> \033[35m[✦ CF官方域名 (探索外链/不入库)]\033[0m")
-        # 2. 如果已经存在于历史文件中：跳过写入
-        elif current_domain in saved_cf_domains:
-            print(" -> \033[33m[⊙ 已在记录中 (跳过)]\033[0m")
-        # 3. 普通第三方域名且走 Cloudflare：验证写入
-        elif is_cloudflare_domain(current_domain):
-            print(" -> \033[32m[✓ 命中 Cloudflare]\033[0m")
-            saved_cf_domains.add(current_domain)
-            new_added_count += 1
-            record_line = (
-                f"{current_domain}#CF冷门优选_{len(saved_cf_domains)}\n"
-            )
-            with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
-                f.write(record_line)
-        # 4. 不属于 Cloudflare
+        if is_cloudflare_own_domain(current):
+            print(" -> [CF官方域名 仅探索外链]")
+        elif current in saved:
+            print(" -> [已在记录中 跳过]")
+        elif is_cloudflare_domain(current):
+            # 主域聚合：同一主域最多 MAX_SUBDOMAINS_PER_ROOT 个子域
+            if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
+                print(f" -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
+            else:
+                print(" -> [命中 Cloudflare]")
+                saved.add(current)
+                root_sub_count[root] += 1
+                new_added += 1
+                # 边探测边落盘，2 分钟超时中断也不丢数据
+                with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
+                    f.write(current + "\n")
         else:
-            print(" -> \033[31m[✗ 跳过]\033[0m")
-            if current_domain == root_domain:
-                non_cf_root_domains.add(root_domain)
+            print(" -> [非 Cloudflare 跳过]")
+            if current == root:
+                non_cf_roots.add(root)
 
-        # 抓取页面继续向下扩散（包括 CF 官方页面）
-        for schema in ["https://", "http://"]:
+        # 抓取页面继续向下扩散
+        for schema in ("https://", "http://"):
             try:
-                target_url = f"{schema}{current_domain}"
+                target_url = f"{schema}{current}"
                 response = requests.get(target_url, headers=HEADERS, timeout=6)
                 if response.text and len(response.text) > 100:
-                    new_domains = extract_all_domains_deep(
-                        response.text, target_url
-                    )
-                    added_count = 0
+                    new_domains = extract_all_domains_deep(response.text, target_url)
+                    added = 0
                     for nd in new_domains:
                         nd_root = get_registered_domain(nd)
-                        if (
-                            nd not in visited_domains
-                            and nd_root not in non_cf_root_domains
-                        ):
+                        if nd not in visited and nd_root not in non_cf_roots:
                             domain_queue.append(nd)
-                            added_count += 1
-                    if added_count > 0:
-                        print(
-                            f"    └─ \033[36m[+] 从该页面深度嗅探出 {added_count} 个新域名入队\033[0m"
-                        )
+                            added += 1
+                    if added:
+                        print(f"    └─ [+] 嗅探出 {added} 个新域名入队")
                     break
             except Exception:
                 continue
 
     print("=" * 60)
-    print(
-        f"[!] 探索结束！本次新增 {new_added_count} 个第三方优质域名，文件总计 {len(saved_cf_domains)} 个（已自动过滤 CF 官方域名）。"
-    )
+    print(f"[!] 本轮结束：新增 {new_added} 个域名，文件总计 {len(saved)} 个（已过滤 CF 官方域名，主域≤{MAX_SUBDOMAINS_PER_ROOT}）")
 
 
 if __name__ == "__main__":
     try:
-        user_input = input(
-            "请输入起始探索域名（例如 blog.cloudflare.com / flutter.dev）：\n> "
-        ).strip()
-        if user_input:
-            run_cf_explorer(user_input, max_limit=50)
-        else:
-            print("输入不能为空！")
+        run_cf_explorer()
     except KeyboardInterrupt:
         print("\n[!] 手动停止，数据已安全保存。")
