@@ -83,6 +83,7 @@ CF_IP_RANGES = [
 ]
 
 # Cloudflare 官方自有根域名（仅用于探索外链，不写入最终 txt）
+# 注：one.one.one.one 经 tldextract 解析后 registered domain 为 one.one
 CF_OWN_ROOT_DOMAINS = {
     "cloudflare.com",
     "cloudflare.net",
@@ -91,6 +92,11 @@ CF_OWN_ROOT_DOMAINS = {
     "cloudflare-ech.com",
     "cloudflarestatus.com",
     "cloudflareresearch.com",
+    "cloudflareaccess.com",
+    "imagedelivery.net",
+    "one.one",
+    "trycloudflare.com",
+    "r2.dev",
     "workers.dev",
     "pages.dev",
     "cf-ipfs.com",
