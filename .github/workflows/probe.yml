@@ -17,7 +17,7 @@ concurrency:
 jobs:
   discover-cf-domains:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,8 +43,7 @@ jobs:
           fi
 
       - name: Run probe
-        # 探测时长由脚本内部 PROBE_TIME_LIMIT 控制（当前测试阶段 30s），
-        # 程序自身优雅停止后进入收尾并退出，无需外部 timeout 强杀
+        # 探测时长由脚本内部 PROBE_TIME_LIMIT 控制（600s）
         run: python cf_probe_select.py
 
       - name: Commit and push results

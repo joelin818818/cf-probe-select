@@ -184,8 +184,8 @@ MAX_SUBDOMAINS_PER_ROOT = 3
 # 单次运行最多新增的域名数（防止 2 分钟内无限扩散）
 MAX_NEW_PER_RUN = 200
 
-# 探测阶段时长上限（秒）—— 由程序自身计时优雅停止，而非外部 timeout 强杀
-PROBE_TIME_LIMIT = 30
+# 探测阶段时长上限（秒），由程序自身计时优雅停止
+PROBE_TIME_LIMIT = 600
 
 # 单页嗅探入队上限，防止巨型页把队列撑爆
 MAX_NEW_PER_PAGE = 50
@@ -560,7 +560,7 @@ def run_cf_explorer():
 
     with ThreadPoolExecutor(max_workers=10) as pool:
         while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
-            # 程序自身计时优雅停止：到时间则结束探测循环，进入收尾
+            # 达到时长上限则停止探测，进入收尾
             if time.time() - start_time >= PROBE_TIME_LIMIT:
                 print(f"\n[*] 已达探测时长上限 {PROBE_TIME_LIMIT}s，停止探测，进入收尾...")
                 break
