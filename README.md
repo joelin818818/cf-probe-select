@@ -53,12 +53,6 @@ cf-probe-select/
 └── README.md
 ```
 
-## 路线图
-
-1. ✅ 阶段一：发现使用 Cloudflare 的第三方站点，写入 `cf_domains.txt`（GitHub Actions 自动探测）
-2. ✅ 阶段二：测速与优选 —— `worker/` Cloudflare Worker 前端，在**浏览器侧**对每个域名实时测速并动态排序，用户自行选择最快节点（详见 `worker/README.md`）
-3. 🚧 阶段三：可选增强 —— 服务端批量预测速、连续多次取均值提升排序稳定性等
-
 ## 许可证
 
 MIT
