@@ -369,14 +369,16 @@ async function loadDomains() {
   // 重置上一轮结果，确保刷新后是全新数据
   results = [];
   ipMap = {};
+  testing = false;
+  document.getElementById("start").disabled = false;
   document.getElementById("src").textContent =
     "数据源：GitHub 自动探测累积（实时）· 共 " + domains.length + " 个域名";
   render();
-  resolveAllIps();
 }
 
 async function resolveAllIps() {
   const CONC = 5;
+  let done = 0;
   for (let i = 0; i < domains.length; i += CONC) {
     const batch = domains.slice(i, i + CONC);
     await Promise.all(batch.map(async (d) => {
@@ -387,6 +389,8 @@ async function resolveAllIps() {
       } catch (e) {
         ipMap[d] = [];
       }
+      done++;
+      info.textContent = "IP 解析中… " + done + " / " + domains.length;
       render();
     }));
   }
@@ -394,7 +398,7 @@ async function resolveAllIps() {
 
 function ipHtml(domain) {
   const list = ipMap[domain];
-  if (!list) return '<span class="badge">解析中</span>';
+  if (!list) return '<span class="badge">—</span>';
   if (!list.length) return '<span class="badge">—</span>';
   return '<div class="ip-list">' + list.map(x => {
     const lat = (x.lat !== undefined && x.lat !== null)
@@ -413,7 +417,7 @@ function isSuspicious(domain) {
 // CF 判定单元格：全部 CF -> ✓；任一非 CF -> ✗（交叉）；未判定 -> -
 function cfHtml(domain) {
   const list = ipMap[domain];
-  if (!list) return '<span class="cf-unknown">解析中</span>';
+  if (!list) return '<span class="cf-unknown">—</span>';
   if (!list.length) return '<span class="cf-unknown">—</span>';
   const allCf = list.every((x) => x.isCf === true);
   const anyNonCf = list.some((x) => x.isCf === false);
@@ -536,11 +540,9 @@ async function startTest() {
   testing = true;
   document.getElementById("start").disabled = true;
   results = [];
+  info.textContent = "IP 解析中… 0 / " + domains.length;
+  await resolveAllIps();
   let done = 0;
-  // 等待 IP 解析完成（若用户提前点击）
-  while (Object.keys(ipMap).length < domains.length) {
-    await new Promise((r) => setTimeout(r, 200));
-  }
   info.textContent = "测速中… 0 / " + domains.length;
   // 并发 8 个，逐批测速，每个 IP 各测 3 轮取平均
   const CONC = 8;
