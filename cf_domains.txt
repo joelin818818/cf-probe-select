@@ -6,7 +6,6 @@ example.com
 geolocation.onetrust.com
 imagedelivery.net
 maxcdn.bootstrapcdn.com
-one.one.one.one
 soitron.com.tr
 sysnect.co.th
 tailwindcss.com
