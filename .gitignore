@@ -13,4 +13,7 @@ venv/
 # 本地工具目录，不入库（含记忆/配置，且为私密）
 .codebuddy/
 
+# Cloudflare Worker 本地运行缓存与临时构建产物
+worker/.wrangler/
+
 # 注意：cf_domains.txt 需纳入版本控制（探测结果回推仓库），不再忽略
