@@ -91,6 +91,11 @@ export default {
         return json({ domain, ips });
       }
 
+      if (path === "/api/cf-ranges") {
+        const ranges = await getCfRanges();
+        return json({ count: ranges.length });
+      }
+
       if (path === "/api/health") {
         return json({ ok: true, time: new Date().toISOString() });
       }
@@ -104,17 +109,22 @@ export default {
 
 async function resolveIps(domain) {
   try {
-    let answers = await dohResolve(domain, "https://cloudflare-dns.com/dns-query");
-    if (!answers.length) {
-      answers = await dohResolve(domain, "https://dns.google/resolve");
-    }
+    let answers = await dohResolve(domain);
     answers = answers.slice(0, 3);
+
+    // 懒加载 CF 官方 IP 段，用于判定解析出的 IP 是否属于 Cloudflare
+    const cfRanges = await getCfRanges();
 
     const out = [];
     for (const ans of answers) {
       const ip = ans.data;
       const loc = await fetchIpLocation(ip);
-      out.push({ ip, country: loc.country, countryCode: loc.countryCode });
+      out.push({
+        ip,
+        country: loc.country,
+        countryCode: loc.countryCode,
+        isCf: cfRanges ? isIpInRanges(ip, cfRanges) : null, // null = 未能判定
+      });
     }
     return out;
   } catch (e) {
@@ -122,24 +132,82 @@ async function resolveIps(domain) {
   }
 }
 
-async function dohResolve(domain, baseUrl) {
-  try {
-    const url =
-      baseUrl +
-      "?name=" +
-      encodeURIComponent(domain) +
-      "&type=A" +
-      (baseUrl.includes("google") ? "" : "");
-    const res = await fetch(url, {
-      headers: { Accept: "application/dns-json" },
-      cf: { cacheTtl: 300 },
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.Answer || []).filter((a) => a.type === 1);
-  } catch (e) {
-    return [];
+// 国内可达的 DoH 解析（阿里 / 腾讯），优先阿里，失败回退腾讯
+async function dohResolve(domain) {
+  const providers = [
+    "https://dns.alidns.com/dns-query",
+    "https://doh.pub/dns-query",
+  ];
+  for (const baseUrl of providers) {
+    try {
+      const url =
+        baseUrl + "?name=" + encodeURIComponent(domain) + "&type=A";
+      const res = await fetch(url, {
+        headers: { Accept: "application/dns-json" },
+        cf: { cacheTtl: 300 },
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const answers = (data.Answer || []).filter((a) => a.type === 1);
+      if (answers.length) return answers;
+    } catch (e) {
+      continue;
+    }
   }
+  return [];
+}
+
+// ---------- Cloudflare IP 段判定 ----------
+
+let CF_RANGES_CACHE = null;
+let CF_RANGES_TS = 0;
+const CF_RANGES_TTL = 24 * 3600 * 1000;
+
+async function getCfRanges() {
+  const now = Date.now();
+  if (CF_RANGES_CACHE && now - CF_RANGES_TS < CF_RANGES_TTL) {
+    return CF_RANGES_CACHE;
+  }
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch("https://www.cloudflare.com/ips-v4", {
+      signal: ctrl.signal,
+      cf: { cacheTtl: 86400 },
+    });
+    clearTimeout(t);
+    if (!res.ok) return CF_RANGES_CACHE || null;
+    const text = await res.text();
+    const ranges = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && l.includes("/"));
+    CF_RANGES_CACHE = ranges;
+    CF_RANGES_TS = now;
+    return ranges;
+  } catch (e) {
+    return CF_RANGES_CACHE || null;
+  }
+}
+
+function ipToNum(ip) {
+  let n = 0;
+  for (const p of ip.split(".")) {
+    n = n * 256 + (parseInt(p, 10) || 0);
+  }
+  return n;
+}
+
+function isIpInRanges(ip, ranges) {
+  const num = ipToNum(ip);
+  for (const cidr of ranges) {
+    const [base, bits] = cidr.split("/");
+    const mask = bits ? parseInt(bits, 10) : 32;
+    const baseNum = ipToNum(base);
+    const shift = 32 - mask;
+    if ((num >> shift) === (baseNum >> shift)) return true;
+  }
+  return false;
 }
 
 async function fetchIpLocation(ip) {
@@ -230,9 +298,15 @@ function html() {
   .ip-list { display: flex; flex-direction: column; gap: 4px; }
   .ip-item { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
   .cc { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); padding: 0 5px; border-radius: 4px; white-space: nowrap; }
+  .cf-yes { color: var(--good); font-weight: 700; }
+  .cf-no { color: var(--bad); font-weight: 700; }
+  .cf-unknown { color: var(--muted); }
+  .cross { color: var(--bad); font-weight: 700; }
+  .warn-row { border-left: 3px solid var(--bad); }
   .empty { color: var(--muted); padding: 40px; text-align: center; }
   .rank { color: var(--muted); width: 40px; }
   .best { color: var(--accent); font-weight: 700; }
+  .flag-warn { font-size: 10px; color: var(--bad); border: 1px solid var(--bad); padding: 0 5px; border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -256,12 +330,13 @@ function html() {
         <th class="rank">#</th>
         <th data-sort="domain">域名</th>
         <th data-sort="ip">IP 归属地（前 3）</th>
+        <th data-sort="cf">CF IP</th>
         <th data-sort="lat">延迟 (ms)</th>
         <th data-sort="status">状态</th>
       </tr>
     </thead>
     <tbody id="tbody">
-      <tr><td colspan="5" class="empty">加载中…</td></tr>
+      <tr><td colspan="6" class="empty">加载中…</td></tr>
     </tbody>
   </table>
 </div>
@@ -312,15 +387,35 @@ function ipHtml(domain) {
   ).join("") + '</div>';
 }
 
+// 该域名是否任一 IP 不在 CF 段（isCf === false 即判定为非 CF，疑似伪 CF）
+function isSuspicious(domain) {
+  const list = ipMap[domain];
+  if (!list || !list.length) return false;
+  return list.some((x) => x.isCf === false);
+}
+
+// CF 判定单元格：全部 CF -> ✓；任一非 CF -> ✗（交叉）；未判定 -> -
+function cfHtml(domain) {
+  const list = ipMap[domain];
+  if (!list) return '<span class="cf-unknown">解析中</span>';
+  if (!list.length) return '<span class="cf-unknown">—</span>';
+  const allCf = list.every((x) => x.isCf === true);
+  const anyNonCf = list.some((x) => x.isCf === false);
+  if (allCf) return '<span class="cf-yes">✓ CF</span>';
+  if (anyNonCf) return '<span class="cf-no cross">✗ 非CF</span>';
+  return '<span class="cf-unknown">?</span>';
+}
+
 function render() {
   if (!results.length && !testing) {
     if (!domains.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">暂无域名数据</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无域名数据</td></tr>';
       return;
     }
     tbody.innerHTML = domains
-      .map((d, i) => \`<tr class="row" data-d="\${d}"><td class="rank">\${i + 1}</td>
-        <td>\${d}</td><td>\${ipHtml(d)}</td><td class="lat">—</td><td><span class="badge">未测</span></td></tr>\`)
+      .map((d, i) => \`<tr class="row \${isSuspicious(d) ? "warn-row" : ""}" data-d="\${d}"><td class="rank">\${i + 1}</td>
+        <td>\${d}\${isSuspicious(d) ? ' <span class="flag-warn">疑似伪CF</span>' : ""}</td>
+        <td>\${ipHtml(d)}</td><td>\${cfHtml(d)}</td><td class="lat">—</td><td><span class="badge">未测</span></td></tr>\`)
       .join("");
     return;
   }
@@ -332,8 +427,10 @@ function render() {
       else if (r.status === "timeout") { cls += " timeout"; txt = "> " + TIMEOUT; st = '<span class="badge">超时</span>'; }
       else { cls += " err"; txt = "✕"; st = '<span class="badge">失败</span>'; }
       const best = i === 0 && r.status === "ok" ? "best" : "";
-      return \`<tr class="row \${best}" data-d="\${r.domain}"><td class="rank">\${i + 1}</td>
-        <td>\${r.domain}</td><td>\${ipHtml(r.domain)}</td><td class="\${cls}">\${txt}</td><td>\${st}</td></tr>\`;
+      const warn = isSuspicious(r.domain) ? "warn-row" : "";
+      return \`<tr class="row \${best} \${warn}" data-d="\${r.domain}"><td class="rank">\${i + 1}</td>
+        <td>\${r.domain}\${isSuspicious(r.domain) ? ' <span class="flag-warn">疑似伪CF</span>' : ""}</td>
+        <td>\${ipHtml(r.domain)}</td><td>\${cfHtml(r.domain)}</td><td class="\${cls}">\${txt}</td><td>\${st}</td></tr>\`;
     })
     .join("");
 }
@@ -346,6 +443,11 @@ function sortFn(a, b) {
     const ca = ipMap[a.domain]?.[0]?.country || "zzz";
     const cb = ipMap[b.domain]?.[0]?.country || "zzz";
     return ca.localeCompare(cb);
+  }
+  if (sortMode === "cf") {
+    // CF 优先：全 CF -> 0，疑似非 CF -> 1，未判定 -> 2
+    const rank = (d) => (isSuspicious(d) ? 1 : (ipMap[d]?.every(x => x.isCf === true) ? 0 : 2));
+    return rank(a.domain) - rank(b.domain);
   }
   // 延迟升序：ok 优先，其次 timeout，最后 err；同状态按数值
   const rank = (s) => (s === "ok" ? 0 : s === "timeout" ? 1 : 2);
