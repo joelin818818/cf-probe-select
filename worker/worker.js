@@ -243,27 +243,28 @@ function html() {
   .status { color: var(--muted); font-size: 13px; }
   .wrap { padding: 12px 24px 40px; overflow-x: auto; }
   table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th { color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
   th:hover { color: var(--fg); }
   tr.row { cursor: pointer; }
   tr.row:hover { background: #1d2230; }
+  tbody tr { content-visibility: auto; contain-intrinsic-size: 0 40px; }
   .lat { font-variant-numeric: tabular-nums; font-weight: 600; }
   .ok { color: var(--good); }
   .timeout { color: var(--warn); }
   .err { color: var(--bad); }
-  .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-  .ip-list { display: flex; flex-direction: column; gap: 4px; }
-  .ip-item { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .ip-list { display: inline; }
+  .ip-item { display: inline; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
   .ip-lat { font-size: 11px; color: var(--good); margin-left: 2px; font-variant-numeric: tabular-nums; }
-  .rounds { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .rounds { display: inline; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
   .rounds b { color: var(--good); font-weight: 700; }
   .rounds .t { color: var(--warn); font-weight: 700; }
   .rounds .e { color: var(--bad); font-weight: 700; }
-  .td-lat .lat { font-weight: 700; font-variant-numeric: tabular-nums; }
-  .td-lat .lat.ok { color: var(--good); }
-  .td-lat .lat.timeout { color: var(--warn); }
-  .td-lat .lat.err { color: var(--bad); }
+  .lat { display: inline; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .lat.ok { color: var(--good); }
+  .lat.timeout { color: var(--warn); }
+  .lat.err { color: var(--bad); }
   .cc { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); padding: 0 5px; border-radius: 4px; white-space: nowrap; }
   .cf-yes { color: var(--good); font-weight: 700; }
   .cf-no { color: var(--bad); font-weight: 700; }
@@ -363,11 +364,12 @@ function ipHtml(domain) {
   const list = ipMap[domain];
   if (!list) return '<span class="badge">—</span>';
   if (!list.length) return '<span class="badge">—</span>';
-  return '<div class="ip-list">' + list.map(x => {
+  // 所有 IP 在同一行显示，用 " · " 分隔，减少行高
+  return '<span class="ip-list">' + list.map(x => {
     const lat = (x.lat !== undefined && x.lat !== null)
       ? \`<span class="ip-lat">\${x.lat}ms</span>\` : "";
-    return \`<div class="ip-item"><span>\${x.ip}</span>\${lat}</div>\`;
-  }).join("") + '</div>';
+    return \`<span class="ip-item">\${x.ip}\${lat}</span>\`;
+  }).join(" · ") + '</span>';
 }
 
 // 该域名是否任一 IP 不在 CF 段（isCf === false 即判定为非 CF，疑似伪 CF）
@@ -389,7 +391,7 @@ function cfHtml(domain) {
   return '<span class="cf-unknown">?</span>';
 }
 
-// 延迟列：展示 3 轮成绩（数字=ms，T=超时，E=失败）+ 平均成绩
+// 延迟列：展示 3 轮成绩（数字=ms，T=超时，E=失败）+ 平均成绩，全部行内显示
 function latHtml(st) {
   if (st.phase === "resolving") return '<span class="badge">解析中</span>';
   if (st.phase === "resolved") return '<span class="badge">待测</span>';
@@ -402,8 +404,8 @@ function latHtml(st) {
   };
   var avgTxt = st.status === "ok" ? st.lat + "ms" : st.status === "timeout" ? ">8s" : "✕";
   var avgCls = st.status === "ok" ? "ok" : st.status === "timeout" ? "timeout" : "err";
-  return '<div class="rounds">' + st.rounds.map(cell).join(" / ") + '</div>' +
-         '<div class="lat ' + avgCls + '">均 ' + avgTxt + '</div>';
+  return '<span class="rounds">' + st.rounds.map(cell).join(" / ") + '</span>' +
+         '<span class="lat ' + avgCls + '"> 均 ' + avgTxt + '</span>';
 }
 
 function render() {
@@ -479,7 +481,7 @@ async function measureOne(target) {
       signal: ctrl.signal,
     });
     clearTimeout(timer);
-    return performance.now() - t0;
+    return Math.round(performance.now() - t0);
   } catch (e) {
     if (e.name === "AbortError") return "timeout";
     return "err";
