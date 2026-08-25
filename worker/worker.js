@@ -76,6 +76,14 @@ export default {
 
 async function resolveIps(domain) {
   try {
+    // 1) Worker 侧 5 分钟缓存命中则直接返回
+    const lower = domain.toLowerCase();
+    const now = Date.now();
+    const cached = RESOLVE_CACHE[lower];
+    if (cached && now - cached.ts < RESOLVE_CACHE_TTL) {
+      return cached.ips;
+    }
+
     let answers = await dohResolve(domain);
     answers = answers.slice(0, 3);
 
@@ -90,6 +98,7 @@ async function resolveIps(domain) {
         isCf: cfRanges ? isIpInRanges(ip, cfRanges) : null, // null = 未能判定
       });
     }
+    RESOLVE_CACHE[lower] = { ips: out, ts: now };
     return out;
   } catch (e) {
     return [];
@@ -126,6 +135,10 @@ async function dohResolve(domain) {
 let CF_RANGES_CACHE = null;
 let CF_RANGES_TS = 0;
 const CF_RANGES_TTL = 24 * 3600 * 1000;
+
+// Worker 侧解析缓存：同一域名 5 分钟内重复解析直接返回，减少 DoH 请求
+let RESOLVE_CACHE = {};
+const RESOLVE_CACHE_TTL = 5 * 60 * 1000;
 
 async function getCfRanges() {
   const now = Date.now();
@@ -299,13 +312,32 @@ function html() {
 const TIMEOUT = 8000;       // 单域名测速超时
 const RENDER_EVERY = 10;    // 每完成 10 个域名刷新一次列表（动态更新 + 重排）
 let domains = [];
-let ipMap = {};             // domain -> [{ip, country, countryCode, lat}]
-let stateMap = {};          // domain -> { phase, lat, status }
+let ipMap = {};             // domain -> [{ip, isCf}]
+let stateMap = {};          // domain -> { phase, lat, status, rounds, okRounds, avg }
 let testing = false;
 let orderIndex = {};        // domain -> 原始序号，用于稳定排序兜底
+let resolveCache = {};      // 前端解析缓存：domain -> {ips, ts}
+const RESOLVE_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
 
 const tbody = document.getElementById("tbody");
 const info = document.getElementById("info");
+
+async function resolveDomain(d) {
+  const lower = d.toLowerCase();
+  const now = Date.now();
+  const cached = resolveCache[lower];
+  if (cached && now - cached.ts < RESOLVE_CACHE_TTL) return cached.ips;
+  try {
+    const r = await fetch("/api/resolve?domain=" + encodeURIComponent(d));
+    const data = await r.json();
+    const ips = data.ips || [];
+    resolveCache[lower] = { ips, ts: now };
+    return ips;
+  } catch (e) {
+    resolveCache[lower] = { ips: [], ts: now };
+    return [];
+  }
+}
 
 async function loadDomains() {
   const r = await fetch("/api/domains", { cache: "no-store" });
@@ -497,16 +529,10 @@ async function startTest() {
     stateMap[d] = { phase: "idle", lat: null, status: null, rounds: null, okRounds: 0, avg: null };
   });
 
-  // 单域名任务：先解析 IP，解析完立即测速（解析与测速重叠，不必等全部解析完）
+  // 单域名任务：先解析 IP（带前端缓存），解析完立即测速（解析与测速重叠）
   async function resolveAndMeasure(d) {
     stateMap[d].phase = "resolving";
-    try {
-      const r = await fetch("/api/resolve?domain=" + encodeURIComponent(d));
-      const data = await r.json();
-      ipMap[d] = data.ips || [];
-    } catch (e) {
-      ipMap[d] = [];
-    }
+    ipMap[d] = await resolveDomain(d);
     stateMap[d].phase = "resolved";
     await measure(d); // 内部会把 phase 置为 measuring -> done
   }

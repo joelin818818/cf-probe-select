@@ -1,3 +1,4 @@
+import bisect
 import html
 import importlib
 import ipaddress
@@ -7,10 +8,12 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque, defaultdict
+from functools import lru_cache
 from urllib.parse import unquote, urljoin, urlparse
 
 from bs4 import XMLParsedAsHTMLWarning
@@ -87,7 +90,7 @@ def load_cf_ip_ranges(timeout: int = 10):
     """从 Cloudflare 官网拉取最新 IPv4 CIDR 段，失败则返回兜底列表。"""
     url = "https://www.cloudflare.com/ips-v4"
     try:
-        resp = requests.get(url, timeout=timeout)
+        resp = HTTP_SESSION.get(url, timeout=timeout)
         resp.raise_for_status()
         ranges = []
         for line in resp.text.splitlines():
@@ -107,6 +110,22 @@ def load_cf_ip_ranges(timeout: int = 10):
 
 
 CF_IP_RANGES = load_cf_ip_ranges()
+
+
+def _build_cf_ip_index(networks):
+    """把 CF CIDR 合并成有序不重叠区间列表，用于二分查找。返回 [(start_int, end_int)]"""
+    merged = []
+    for net in sorted(networks, key=lambda n: n.network_address):
+        start = int(net.network_address)
+        end = int(net.broadcast_address)
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+CF_IP_INDEX = _build_cf_ip_index(CF_IP_RANGES)
 
 # Cloudflare 官方自有根域名（仅用于探索外链，不写入最终 txt）
 CF_OWN_ROOT_DOMAINS = {
@@ -168,6 +187,13 @@ HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
+# 全局 Session，复用 TCP/TLS 连接，减少探测与扩散时的握手开销
+HTTP_SESSION = requests.Session()
+HTTP_SESSION.headers.update(HEADERS)
+
+# 探测阶段 DNS 解析缓存：domain -> [ips]，供落盘前快速预判，避免重复解析
+DOMAIN_IP_CACHE = {}
+
 OUTPUT_FILE = "cf_domains.txt"
 BOOTSTRAP_SEEDS = ["cloudflare.com"]
 SEED_SAMPLE_SIZE = 5
@@ -210,6 +236,7 @@ def load_existing_domains(filepath: str):
     return saved, root_sub_count
 
 
+@lru_cache(maxsize=None)
 def get_registered_domain(domain: str) -> str:
     extracted = tldextract.extract(domain)
     if extracted.suffix:
@@ -228,13 +255,19 @@ def is_big_tech(domain: str) -> bool:
 
 
 def is_cloudflare_ip(ip_str: str) -> bool:
+    """判断 IP 是否落在 Cloudflare 官方 IPv4 CIDR 内（只认 IP 段硬过滤，二分查找 O(log n)）"""
     try:
         ip_obj = ipaddress.ip_address(ip_str)
         if not isinstance(ip_obj, ipaddress.IPv4Address):
             return False
-        return any(ip_obj in network for network in CF_IP_RANGES)
+        ip_int = int(ip_obj)
     except ValueError:
         return False
+    idx = bisect.bisect_right(CF_IP_INDEX, (ip_int, 2 ** 64)) - 1
+    if idx < 0:
+        return False
+    start, end = CF_IP_INDEX[idx]
+    return start <= ip_int <= end
 
 
 def resolve_ips(domain: str) -> list:
@@ -308,7 +341,7 @@ def resolve_via_udp_dns(domain: str, server: str, timeout: int = 5) -> list:
 def resolve_via_doh(domain: str, base_url: str, timeout: int = 5) -> list:
     try:
         url = base_url + "?name=" + domain + "&type=A"
-        r = requests.get(url, headers={"Accept": "application/dns-json"}, timeout=timeout)
+        r = HTTP_SESSION.get(url, headers={"Accept": "application/dns-json"}, timeout=timeout)
         if not r.ok:
             return []
         data = r.json()
@@ -348,19 +381,12 @@ def resolve_ips_multi(domain: str) -> dict:
 
 
 def is_cloudflare_domain(domain: str) -> bool:
+    """探测阶段快速判定：只认 IP 段硬过滤（单源系统 DNS），不判断 Server 头；缓存解析结果。"""
     ips = resolve_ips(domain)
+    DOMAIN_IP_CACHE[domain] = ips
     for ip in ips:
         if is_cloudflare_ip(ip):
             return True
-
-    for schema in ("https://", "http://"):
-        try:
-            url = f"{schema}{domain}"
-            resp = requests.head(url, headers=HEADERS, timeout=3, allow_redirects=True)
-            if "cloudflare" in resp.headers.get("Server", "").lower():
-                return True
-        except requests.RequestException:
-            continue
     return False
 
 
@@ -372,6 +398,11 @@ def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
 
     # ==================== 修改点 2 ====================
     def check(domain):
+        # 若探测阶段缓存的 IP 已包含非 CF，直接剔除，避免重复多源解析
+        cached = DOMAIN_IP_CACHE.get(domain, [])
+        if cached and not all(is_cloudflare_ip(ip) for ip in cached):
+            return (domain, False, f"缓存IP含非CF: {','.join(cached)}")
+
         sources = resolve_ips_multi(domain)
         non_cf_sources = []
         successful_nodes = 0  # 记录成功解析的节点数量
@@ -451,7 +482,7 @@ def _trim_by_latency(saved: set, root_sub_count: defaultdict, cap: int) -> int:
     def _one(d):
         try:
             t0 = time.time()
-            requests.head("https://" + d, headers=HEADERS, timeout=LATENCY_TIMEOUT, allow_redirects=True)
+            HTTP_SESSION.head("https://" + d, timeout=LATENCY_TIMEOUT, allow_redirects=True)
             return d, time.time() - t0
         except Exception:
             return d, None
@@ -577,6 +608,7 @@ def run_cf_explorer():
     visited = set()
     non_cf_roots = set()
     new_added = 0
+    state_lock = threading.Lock()  # 保护 saved/root_sub_count/non_cf_roots/new_added/visited
 
     print(f"[*] 结果保存路径: {os.path.abspath(OUTPUT_FILE)}\n" + "=" * 60)
 
@@ -588,11 +620,50 @@ def run_cf_explorer():
             else:
                 d = normal_q.popleft()
             d = d.strip().lower()
-            if d in visited:
-                continue
-            visited.add(d)
+            with state_lock:
+                if d in visited:
+                    continue
+                visited.add(d)
             batch.append(d)
         return batch
+
+    def process_one(current):
+        nonlocal new_added
+        is_cf = is_cloudflare_domain(current)
+        root = get_registered_domain(current)
+
+        with state_lock:
+            if root in non_cf_roots and current != root:
+                return
+
+        print(f"[?] 检测: {current:<40}", end="", flush=True)
+
+        if is_big_tech(current):
+            print(" -> [巨型站 不入库但扩散外链]")
+            _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
+            return
+
+        if is_cloudflare_own_domain(current):
+            print(" -> [CF官方域名 探索外链]")
+            _expand(current, enqueue, visited, non_cf_roots, priority=True, lock=state_lock)
+        elif current in saved:
+            print(" -> [已在记录中 仅扩散外链]")
+            _expand(current, enqueue, visited, non_cf_roots, priority=is_cf, lock=state_lock)
+        elif is_cf:
+            with state_lock:
+                if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
+                    print(f" -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
+                    return
+                print(" -> [命中 Cloudflare 第三方]")
+                saved.add(current)
+                root_sub_count[root] += 1
+                new_added += 1
+            _expand(current, enqueue, visited, non_cf_roots, priority=True, lock=state_lock)
+        else:
+            print(" -> [非 Cloudflare 跳过]")
+            if current == root:
+                with state_lock:
+                    non_cf_roots.add(root)
 
     with ThreadPoolExecutor(max_workers=10) as pool:
         while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
@@ -604,39 +675,8 @@ def run_cf_explorer():
             if not batch:
                 break
 
-            results = pool.map(is_cloudflare_domain, batch)
-
-            for current, is_cf in zip(batch, results):
-                root = get_registered_domain(current)
-                if root in non_cf_roots and current != root:
-                    continue
-
-                print(f"[?] 检测: {current:<40}", end="", flush=True)
-
-                if is_big_tech(current):
-                    print(" -> [巨型站 不入库但扩散外链]")
-                    _expand(current, enqueue, visited, non_cf_roots, priority=False)
-                    continue
-
-                if is_cloudflare_own_domain(current):
-                    print(" -> [CF官方域名 探索外链]")
-                    _expand(current, enqueue, visited, non_cf_roots, priority=True)
-                elif current in saved:
-                    print(" -> [已在记录中 仅扩散外链]")
-                    _expand(current, enqueue, visited, non_cf_roots, priority=is_cf)
-                elif is_cf:
-                    if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
-                        print(f" -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
-                    else:
-                        print(" -> [命中 Cloudflare 第三方]")
-                        saved.add(current)
-                        root_sub_count[root] += 1
-                        new_added += 1
-                        _expand(current, enqueue, visited, non_cf_roots, priority=True)
-                else:
-                    print(" -> [非 Cloudflare 跳过]")
-                    if current == root:
-                        non_cf_roots.add(root)
+            # 检测+扩散并发执行，充分利用等待时间
+            list(pool.map(process_one, batch))
 
     _flush_all()
     print("=" * 60)
@@ -646,11 +686,11 @@ def run_cf_explorer():
     )
 
 
-def _expand(current, enqueue, visited, non_cf_roots, priority: bool = False):
+def _expand(current, enqueue, visited, non_cf_roots, priority: bool = False, lock=None):
     for schema in ("https://", "http://"):
         try:
             target_url = f"{schema}{current}"
-            response = requests.get(target_url, headers=HEADERS, timeout=6)
+            response = HTTP_SESSION.get(target_url, timeout=6)
             if response.text and len(response.text) > 100:
                 new_domains = extract_all_domains_deep(response.text, target_url)
                 added = 0
@@ -658,7 +698,17 @@ def _expand(current, enqueue, visited, non_cf_roots, priority: bool = False):
                     if added >= MAX_NEW_PER_PAGE:
                         break
                     nd_root = get_registered_domain(nd)
-                    if nd not in visited and nd_root not in non_cf_roots:
+                    check = False
+                    if lock:
+                        with lock:
+                            if nd not in visited and nd_root not in non_cf_roots:
+                                visited.add(nd)
+                                check = True
+                    else:
+                        if nd not in visited and nd_root not in non_cf_roots:
+                            visited.add(nd)
+                            check = True
+                    if check:
                         enqueue(nd, priority=priority)
                         added += 1
                 if added:
