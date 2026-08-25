@@ -18,6 +18,7 @@ let stateMap = {};          // domain -> {phase,lat,status,rounds,okRounds,avg}
 let orderIndex = {};
 let sortMode = "score";
 let testing = false;
+let stopRequested = false;  // 停止测速标志
 let resolvedCount = 0;      // 解析完成计数
 let measuredCount = 0;      // 测速完成计数
 
@@ -102,11 +103,12 @@ async function measureOne(d) {
   return { rounds, okRounds: ok, avg };
 }
 
-// 并发池
+// 并发池（支持停止：stopRequested 为 true 时中止剩余任务）
 async function runPool(tasks, size) {
   let i = 0;
   async function worker() {
     while (i < tasks.length) {
+      if (stopRequested) return;
       const idx = i++;
       await tasks[idx]();
     }
@@ -130,7 +132,9 @@ async function startTest() {
   }
   if (!domains.length) await loadDomains();
   testing = true;
+  stopRequested = false;
   $("start").disabled = true;
+  $("stop").style.display = "";
   resolvedCount = 0; measuredCount = 0;
   for (const d of domains) {
     ipMap[d] = undefined;
@@ -144,6 +148,7 @@ async function startTest() {
   // 阶段一：全部解析完成
   setInfo("解析中…");
   const resolveTasks = domains.map((d) => async () => {
+    if (stopRequested) return;
     try { await resolveOne(d); } catch (e) { ipMap[d] = []; }
     resolvedCount++;
     stateMap[d].phase = "resolved";
@@ -154,10 +159,12 @@ async function startTest() {
     }
   });
   await runPool(resolveTasks, rThreads);
+  if (stopRequested) { finishTest("已停止（解析阶段）"); return; }
 
   // 阶段二：统一测速
   setInfo("测速中…");
   const measureTasks = domains.map((d) => async () => {
+    if (stopRequested) return;
     stateMap[d].phase = "measuring";
     stateMap[d].status = "measuring";
     try {
@@ -181,10 +188,23 @@ async function startTest() {
   });
   await runPool(measureTasks, mThreads);
 
+  finishTest("解析 " + domains.length + "/" + domains.length + " · 测速 " + domains.length + "/" + domains.length + " · 完成");
+}
+
+function finishTest(infoMsg) {
   testing = false;
+  stopRequested = false;
   $("start").disabled = false;
-  setInfo("解析 " + domains.length + "/" + domains.length + " · 测速 " + domains.length + "/" + domains.length + " · 完成");
+  $("stop").style.display = "none";
+  setInfo(infoMsg);
   render();
+}
+
+function stopTest() {
+  if (!testing) return;
+  stopRequested = true;
+  setInfo("正在停止…");
+}
 }
 
 function copyAll() {
@@ -360,6 +380,7 @@ async function testCustomDoh() {
 }
 
 $("start").addEventListener("click", startTest);
+$("stop").addEventListener("click", stopTest);
 $("refresh").addEventListener("click", async () => { await loadDomains(); setInfo("已刷新域名列表"); });
 $("copyAll").addEventListener("click", copyAll);
 $("provider").addEventListener("change", (e) => { saveProvider(e.target.value); updateCustomUI(); });
@@ -443,6 +464,7 @@ export function html() {
 
 <div class="bar">
   <button id="start">开始测速</button>
+  <button id="stop" style="display:none">停止</button>
   <button id="refresh" class="ghost">刷新域名</button>
   <button id="copyAll" class="ghost">复制全部</button>
   <label>DNS 服务商
