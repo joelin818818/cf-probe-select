@@ -18,17 +18,9 @@
 
 import { html } from "./page.js";
 
-// 生成版本号：YYMMDDHHmm（如 2608252254）
-function buildVersion(d = new Date()) {
-  const p = (n, w = 2) => String(n).padStart(w, "0");
-  return (
-    p(d.getFullYear() % 100) +
-    p(d.getMonth() + 1) +
-    p(d.getDate()) +
-    p(d.getHours()) +
-    p(d.getMinutes())
-  );
-}
+// 固定版本号（部署版本）：格式 YYMMDDHHmm（如 2608252254）
+// 每次更新代码、提交前必须手动更新此值，代表本次部署的版本。
+const VERSION = "2608252258";
 
 // ====================================================================
 // DNS 服务商映射表（全仓库唯一来源，page.js 从此处导入）
@@ -205,7 +197,7 @@ export default {
     const path = url.pathname;
 
     if (path === "/" || path === "/index.html") {
-      return new Response(html(buildVersion()), {
+      return new Response(html(VERSION), {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
