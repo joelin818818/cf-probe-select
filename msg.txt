@@ -1,3 +1,0 @@
-fix: 修复 Worker 运行时异常（Error 1101）
-
-page.js 的 providerOptions() 引用了未导入的 DNS_PROVIDER_LIST，导致 html() 抛 ReferenceError 使整个页面 1101。补上从 dns-providers.js 的导入。
