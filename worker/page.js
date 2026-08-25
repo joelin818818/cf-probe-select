@@ -383,7 +383,7 @@ function sortRows() {
     const vb = (ipMap[b] || []).every((x) => x.isCf) ? 1 : 0;
     return vb - va;
   });
-  else if (sortMode === "status") arr.sort((a, b) => (stateMap[a]?.status || "").localeCompare(stateMap[b]?.status || ""));
+  else if (sortMode === "status") arr.sort((a, b) => ((stateMap[a] && stateMap[a].status) || "").localeCompare((stateMap[b] && stateMap[b].status) || ""));
   else if (sortMode === "lat") {
     arr.sort((a, b) => {
       const sa = stateMap[a], sb = stateMap[b];
