@@ -49,22 +49,36 @@ function saveMeasureThreads(n) { localStorage.setItem("cf_mthreads", String(n));
 
 function setInfo(msg) { $("info").textContent = msg; }
 
-async function loadDomains() {
-  const r = await fetch("/api/domains", { cache: "no-store" });
-  const data = await r.json();
-  domains = data.domains || [];
-  ipMap = {}; stateMap = {}; orderIndex = {};
-  domains.forEach((d, i) => {
-    ipMap[d] = undefined;
-    stateMap[d] = { phase: "idle", lat: null, status: null };
-    orderIndex[d] = i;
-  });
-  testing = false;
-  $("start").disabled = false;
-  const src = "数据源：GitHub 自动探测累积（实时）· 共 " + domains.length + " 个域名" +
-    (data.updatedAt ? " · 更新：" + data.updatedAt : "");
-  $("src").textContent = src;
-  render();
+async function loadDomains(attempt = 1) {
+  try {
+    const r = await fetch("/api/domains", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    domains = data.domains || [];
+    ipMap = {}; stateMap = {}; orderIndex = {};
+    domains.forEach((d, i) => {
+      ipMap[d] = undefined;
+      stateMap[d] = { phase: "idle", lat: null, status: null };
+      orderIndex[d] = i;
+    });
+    testing = false;
+    if (!testing) $("start").disabled = false;
+    const src = "数据源：GitHub 自动探测累积（实时）· 共 " + domains.length + " 个域名" +
+      (data.updatedAt ? " · 更新：" + data.updatedAt : "");
+    $("src").textContent = src;
+    render();
+  } catch (e) {
+    console.error("loadDomains failed:", e);
+    if (attempt <= 2) {
+      setInfo("域名列表加载失败，2秒后重试… (" + e.message + ")");
+      setTimeout(() => loadDomains(attempt + 1), 2000);
+    } else {
+      $("src").textContent = "数据源：GitHub 自动探测累积（加载失败，请刷新重试）";
+      $("tbody").innerHTML = '<tr><td colspan="6" class="empty">加载失败：' + e.message + "</td></tr>";
+      $("start").disabled = false;
+    }
+  }
 }
 
 // 解析单个域名（带缓存），更新解析进度
@@ -335,8 +349,8 @@ function initControls() {
 function updateCustomUI() {
   const p = $("provider").value;
   const isCustom = p === "custom";
-  // 显示/隐藏自定义 DoH 输入区
-  $("customDohWrap").style.display = isCustom ? "" : "none";
+  // 显示/隐藏自定义 DoH 输入区（必须用 inline-flex 覆盖 CSS #customDohWrap { display: none }）
+  $("customDohWrap").style.display = isCustom ? "inline-flex" : "none";
   $("customDoh").disabled = !isCustom;
   if (!isCustom) {
     localStorage.removeItem("cf_custom_ok");
