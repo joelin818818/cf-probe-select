@@ -1,13 +1,14 @@
 // DNS 解析服务商映射表（前后端共享语义）
 //
 // 架构约定（2026-08-25 用户确认）：
-// - 除 "local" 外，所有 DoH 解析都【由浏览器客户端直接发起】（包括自定义、
-//   内网自签）。原因：Cloudflare Worker 的 fetch 只能访问公网且必须受信 CA 证书，
-//   无法连内网 / 自签 DoH；而浏览器可手动信任自签证书、可访问同局域网地址。
+// - 除 "local" 外，所有 DoH 解析都【由浏览器客户端直接发起】（含自定义/内网自签）。
+//   原因：Cloudflare Worker 的 fetch 只能访问公网且必须受信 CA 证书，无法连内网 / 自签
+//   DoH；而浏览器可手动信任自签证书、可访问同局域网地址。
 // - "local" 由 Worker 自己发起解析（服务端视角），代表「服务端 -> 域名」的解析结果。
 // - 公开 DoH（aliyun/tencent/...）的 doh 字段供浏览器侧直接使用。
-// - "custom" = 用户提供的公开 https DoH；"browser" = 用户提供的【内网自签 https DoH】，
-//   二者均为浏览器直连，区别仅在校验文案（自签需先在浏览器手动信任）。
+// - "custom" = 用户填写的 DoH 地址，浏览器直连；支持公开 https DoH，也支持【内网自签
+//   https DoH】（自签证书需先在浏览器手动信任该地址）。无需区分"公开/内网自签"两个选项，
+//   二者代码路径完全一致，仅证书信任方式不同。
 
 // 用数组固定下拉顺序（对象在含数字键 "360" 时枚举顺序会乱）
 export const DNS_PROVIDER_LIST = [
@@ -18,8 +19,7 @@ export const DNS_PROVIDER_LIST = [
   { key: "google", label: "Google DoH", doh: "https://dns.google/dns-query" },
   { key: "cloudflare", label: "Cloudflare DoH", doh: "https://1.1.1.1/dns-query" },
   { key: "opendns", label: "OpenDNS DoH", doh: "https://doh.opendns.com/dns-query" },
-  { key: "custom", label: "自定义 DoH（浏览器直连·公开）", doh: "", custom: true },
-  { key: "browser", label: "内网自签 DoH（浏览器直连）", doh: "", browser: true, custom: true },
+  { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },
 ];
 
 export const DNS_PROVIDERS = Object.fromEntries(
@@ -34,7 +34,7 @@ export function resolveDohList(provider, customDoh) {
     return ["https://1.1.1.1/dns-query"];
   }
   const list = [];
-  if (provider === "custom" || provider === "browser") {
+  if (provider === "custom") {
     if (customDoh && /^https:\/\//i.test(customDoh.trim())) list.push(customDoh.trim());
   } else if (provider && DNS_PROVIDERS[provider] && DNS_PROVIDERS[provider].doh) {
     list.push(DNS_PROVIDERS[provider].doh);
@@ -44,11 +44,11 @@ export function resolveDohList(provider, customDoh) {
 
 // 供前端（浏览器）使用的 DoH URL 查询：返回某 provider 对应的浏览器直连 DoH 地址。
 // - local 返回 null（由服务端解析，前端不应调用）
-// - custom/browser 返回用户填写的自定义地址
+// - custom 返回用户填写的自定义地址
 // - 其余返回该服务商的公开 DoH 地址
 export function getDohUrl(provider, customDoh) {
   if (provider === "local") return null;
-  if (provider === "custom" || provider === "browser") return (customDoh || "").trim();
+  if (provider === "custom") return (customDoh || "").trim();
   return (DNS_PROVIDERS[provider] && DNS_PROVIDERS[provider].doh) || null;
 }
 

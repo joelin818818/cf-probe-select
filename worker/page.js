@@ -25,7 +25,7 @@ let measuredCount = 0;      // 测速完成计数
 const $ = (id) => document.getElementById(id);
 const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "状态", score: "综合" };
 
-const PROVIDER_KEYS = ["local","aliyun","tencent","qihoo360","google","cloudflare","opendns","custom","browser"];
+const PROVIDER_KEYS = ["local","aliyun","tencent","qihoo360","google","cloudflare","opendns","custom"];
 function normalizeProviderKey(k) {
   if (k === "360") return "qihoo360";
   return PROVIDER_KEYS.indexOf(k) >= 0 ? k : "local";
@@ -127,7 +127,7 @@ async function markCf(ips) {
 // 取浏览器直连 DoH 地址（local 返回 null，由服务端解析）
 function getDohUrl(provider, customDoh) {
   if (provider === "local") return null;
-  if (provider === "custom" || provider === "browser") return (customDoh || "").trim();
+  if (provider === "custom") return (customDoh || "").trim();
   return (DOh_URLS[provider]) || null;
 }
 
@@ -199,9 +199,9 @@ async function runPool(tasks, size) {
 
 async function startTest() {
   if (testing) return;
-  // 自定义 / 内网自签 DoH 未通过浏览器测试则拦截
+  // 自定义 DoH 未通过浏览器测试则拦截
   const provider = loadProvider();
-  if (provider === "custom" || provider === "browser") {
+  if (provider === "custom") {
     const customDoh = loadCustomDoh();
     if (!customDoh) { alert("请先填写并测试 DoH 地址"); return; }
     if (localStorage.getItem("cf_custom_ok") !== "1") {
@@ -412,18 +412,11 @@ function initControls() {
 }
 function updateCustomUI() {
   const p = $("provider").value;
-  const isCustom = p === "custom" || p === "browser";
+  const isCustom = p === "custom";
   // 显示/隐藏自定义 DoH 输入区（必须用 inline-flex 覆盖 CSS #customDohWrap { display: none }）
   $("customDohWrap").style.display = isCustom ? "inline-flex" : "none";
   $("customDoh").disabled = !isCustom;
-  // 不同模式给出对应占位提示
-  if (p === "browser") {
-    $("customDoh").placeholder = "https://内网地址/dns-query（自签需先信任）";
-  } else if (p === "custom") {
-    $("customDoh").placeholder = "https://公开 DoH 地址";
-  } else {
-    $("customDoh").placeholder = "https://...";
-  }
+  $("customDoh").placeholder = "https://你的 DoH 地址（公开或内网自签）";
   if (!isCustom) {
     localStorage.removeItem("cf_custom_ok");
   }
@@ -439,9 +432,8 @@ function updateCustomUI() {
 async function testCustomDoh() {
   const url = $("customDoh").value.trim();
   if (!url) { alert("请先填写 DoH 地址"); return; }
-  const isBrowserMode = $("provider").value === "browser";
-  if (!isBrowserMode && url.indexOf("https://") !== 0) {
-    alert("公开自定义 DoH 必须是 https:// 开头；内网自签请在「内网自签 DoH」模式下填写（不支持裸 UDP 53）");
+  if (url.indexOf("https://") !== 0) {
+    alert("自定义 DoH 必须是 https:// 开头（不支持裸 UDP 53；https 页面下也不支持 http 内网明文，请用自签 https）");
     return;
   }
   $("testDoh").disabled = true;
@@ -474,9 +466,7 @@ async function testCustomDoh() {
     localStorage.removeItem("cf_custom_ok");
     $("testDoh").textContent = "测试失败";
     $("start").disabled = true;
-    let msg = "测试异常：" + e.message;
-    if (isBrowserMode) msg += "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + url + " 并点「继续」）";
-    alert(msg);
+    alert("测试异常：" + e.message + "\n（若使用自签/内网证书，请先在浏览器手动信任该地址：直接打开 " + url + " 并点「继续」）");
   }
   setTimeout(() => { $("testDoh").textContent = "测试连接"; $("testDoh").disabled = false; }, 1500);
 }
@@ -500,10 +490,10 @@ initControls();
 
 export function html() {
   const options = providerOptions();
-  // 公开 DoH 地址映射（供浏览器客户端直连使用；custom/browser 用用户填写的地址）
+  // 公开 DoH 地址映射（供浏览器客户端直连使用；custom 用用户填写的地址）
   const dohUrls = {};
   DNS_PROVIDER_LIST.forEach((p) => {
-    if (p.doh && !p.browser) dohUrls[p.key] = p.doh;
+    if (p.doh) dohUrls[p.key] = p.doh;
   });
   const frontendJs = "const DOh_URLS = " + JSON.stringify(dohUrls) + ";\n" + FRONTEND_JS;
   return `<!doctype html>
