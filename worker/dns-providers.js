@@ -1,12 +1,13 @@
 // DNS 解析服务商映射表（前后端共享语义）
-// Worker 侧通过 provider key 选择对应的 DoH 地址；
-// 前端下拉使用 LABEL 展示，VALUE 作为请求参数。
 //
-// 说明：
-// - "local" 指「服务端本地 DNS」：Worker 运行环境用其默认递归解析，
-//   并非用户电脑的 DNS（浏览器无法访问用户设备 DNS）。前端会标注说明。
-// - "custom" 为自定义 DoH（HTTPS）地址，仅接受 https:// 开头的 DoH URL，
-//   不支持裸 UDP 53（Worker/Browser 的 fetch 无法发 UDP 包）。
+// 架构约定（2026-08-25 用户确认）：
+// - 除 "local" 外，所有 DoH 解析都【由浏览器客户端直接发起】（包括自定义、
+//   内网自签）。原因：Cloudflare Worker 的 fetch 只能访问公网且必须受信 CA 证书，
+//   无法连内网 / 自签 DoH；而浏览器可手动信任自签证书、可访问同局域网地址。
+// - "local" 由 Worker 自己发起解析（服务端视角），代表「服务端 -> 域名」的解析结果。
+// - 公开 DoH（aliyun/tencent/...）的 doh 字段供浏览器侧直接使用。
+// - "custom" = 用户提供的公开 https DoH；"browser" = 用户提供的【内网自签 https DoH】，
+//   二者均为浏览器直连，区别仅在校验文案（自签需先在浏览器手动信任）。
 
 // 用数组固定下拉顺序（对象在含数字键 "360" 时枚举顺序会乱）
 export const DNS_PROVIDER_LIST = [
@@ -17,29 +18,38 @@ export const DNS_PROVIDER_LIST = [
   { key: "google", label: "Google DoH", doh: "https://dns.google/dns-query" },
   { key: "cloudflare", label: "Cloudflare DoH", doh: "https://1.1.1.1/dns-query" },
   { key: "opendns", label: "OpenDNS DoH", doh: "https://doh.opendns.com/dns-query" },
-  { key: "custom", label: "自定义 DoH", doh: "", custom: true },
+  { key: "custom", label: "自定义 DoH（浏览器直连·公开）", doh: "", custom: true },
+  { key: "browser", label: "内网自签 DoH（浏览器直连）", doh: "", browser: true, custom: true },
 ];
 
 export const DNS_PROVIDERS = Object.fromEntries(
   DNS_PROVIDER_LIST.map((p) => [p.key, p])
 );
 
-// 按顺序返回候选 DoH 列表：优先用户所选，失败回退阿里+腾讯兜底
+// 仅用于 "local"（服务端解析）：返回服务端使用的 DoH 列表。
+// 其他 provider 均由浏览器客户端直连，不再经过本函数（见 page.js 的浏览器解析分支）。
 export function resolveDohList(provider, customDoh) {
+  if (provider === "local") {
+    // 服务端 Worker 自行发起（边缘递归解析器，代表服务端视角）
+    return ["https://1.1.1.1/dns-query"];
+  }
   const list = [];
-  if (provider === "custom") {
-    if (customDoh && /^https:\/\//i.test(customDoh.trim())) {
-      list.push(customDoh.trim());
-    }
+  if (provider === "custom" || provider === "browser") {
+    if (customDoh && /^https:\/\//i.test(customDoh.trim())) list.push(customDoh.trim());
   } else if (provider && DNS_PROVIDERS[provider] && DNS_PROVIDERS[provider].doh) {
     list.push(DNS_PROVIDERS[provider].doh);
   }
-  // 兜底：阿里 + 腾讯（避免单点 DoH 失败导致全量解析失败）
-  if (list.length === 0 || provider === "local") {
-    list.push("https://dns.alidns.com/dns-query");
-    list.push("https://doh.pub/dns-query");
-  }
-  return list;
+  return list; // 非空表示浏览器直连模式（前端不调用此函数解析）
+}
+
+// 供前端（浏览器）使用的 DoH URL 查询：返回某 provider 对应的浏览器直连 DoH 地址。
+// - local 返回 null（由服务端解析，前端不应调用）
+// - custom/browser 返回用户填写的自定义地址
+// - 其余返回该服务商的公开 DoH 地址
+export function getDohUrl(provider, customDoh) {
+  if (provider === "local") return null;
+  if (provider === "custom" || provider === "browser") return (customDoh || "").trim();
+  return (DNS_PROVIDERS[provider] && DNS_PROVIDERS[provider].doh) || null;
 }
 
 // 兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key

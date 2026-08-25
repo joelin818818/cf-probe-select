@@ -25,7 +25,7 @@ let measuredCount = 0;      // 测速完成计数
 const $ = (id) => document.getElementById(id);
 const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "状态", score: "综合" };
 
-const PROVIDER_KEYS = ["local","aliyun","tencent","qihoo360","google","cloudflare","opendns","custom"];
+const PROVIDER_KEYS = ["local","aliyun","tencent","qihoo360","google","cloudflare","opendns","custom","browser"];
 function normalizeProviderKey(k) {
   if (k === "360") return "qihoo360";
   return PROVIDER_KEYS.indexOf(k) >= 0 ? k : "local";
@@ -84,16 +84,78 @@ async function loadDomains(attempt = 1) {
   }
 }
 
+// 浏览器端直连 DoH 解析（DNS-JSON 协议）
+async function browserDohResolve(doh, domain) {
+  if (!doh) return [];
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(doh + "?name=" + encodeURIComponent(domain) + "&type=1", {
+      headers: { accept: "application/dns-json" },
+      signal: ctrl.signal,
+    });
+    clearTimeout(to);
+    if (!r.ok) throw new Error("DoH " + r.status);
+    const j = await r.json();
+    return (j.Answer || [])
+      .filter((a) => a.type === 1 && typeof a.data === "string")
+      .map((a) => a.data);
+  } catch (e) {
+    clearTimeout(to);
+    throw e;
+  }
+}
+
+// IP -> 是否 CF 的浏览器端缓存（去重，减少 /api/cf-check 调用）
+const CF_CACHE = {};
+async function markCf(ips) {
+  if (!ips.length) return [];
+  const uniq = [...new Set(ips)];
+  const need = uniq.filter((ip) => !(ip in CF_CACHE));
+  if (need.length) {
+    try {
+      const r = await fetch("/api/cf-check?ips=" + encodeURIComponent(need.join(",")), { cache: "no-store" });
+      const data = await r.json();
+      for (const ip of need) CF_CACHE[ip] = !!(data.cf && data.cf[ip]);
+    } catch (e) {
+      for (const ip of need) CF_CACHE[ip] = false;
+    }
+  }
+  return ips.map((ip) => ({ ip, isCf: CF_CACHE[ip] }));
+}
+
+// 取浏览器直连 DoH 地址（local 返回 null，由服务端解析）
+function getDohUrl(provider, customDoh) {
+  if (provider === "local") return null;
+  if (provider === "custom" || provider === "browser") return (customDoh || "").trim();
+  return (DOh_URLS[provider]) || null;
+}
+
 // 解析单个域名（带缓存），更新解析进度
 async function resolveOne(d) {
   const provider = loadProvider();
   const customDoh = loadCustomDoh();
-  const res = await fetch("/api/resolve?domain=" + encodeURIComponent(d) +
-    "&provider=" + encodeURIComponent(provider) +
-    (customDoh ? "&customDoh=" + encodeURIComponent(customDoh) : ""), { cache: "no-store" });
-  const data = await res.json();
-  const list = (data.ips || []).slice(0, 3).map((ip) => ({ ip, isCf: !!data.cf }));
-  ipMap[d] = list.length ? list : [];
+
+  // local：由服务端 Worker 自己解析（服务端视角）
+  if (provider === "local") {
+    const res = await fetch("/api/resolve?domain=" + encodeURIComponent(d) + "&provider=local", { cache: "no-store" });
+    const data = await res.json();
+    const list = (data.ips || []).slice(0, 3).map((ip) => ({ ip, isCf: !!data.cf }));
+    ipMap[d] = list.length ? list : [];
+    return list;
+  }
+
+  // 其余所有 DoH（含自定义/内网自签）由浏览器客户端直接发起
+  const doh = getDohUrl(provider, customDoh);
+  let ips = [];
+  try {
+    ips = await browserDohResolve(doh, d);
+  } catch (e) {
+    ips = [];
+  }
+  // CF 判定交服务端（仅持有 CF 网段），浏览器不解析 DNS 判定
+  const list = await markCf(ips.slice(0, 3));
+  ipMap[d] = list;
   return list;
 }
 
@@ -137,13 +199,13 @@ async function runPool(tasks, size) {
 
 async function startTest() {
   if (testing) return;
-  // 自定义 DoH 未通过测试则拦截
+  // 自定义 / 内网自签 DoH 未通过浏览器测试则拦截
   const provider = loadProvider();
-  if (provider === "custom") {
+  if (provider === "custom" || provider === "browser") {
     const customDoh = loadCustomDoh();
-    if (!customDoh) { alert("请先填写并测试自定义 DoH 地址"); return; }
+    if (!customDoh) { alert("请先填写并测试 DoH 地址"); return; }
     if (localStorage.getItem("cf_custom_ok") !== "1") {
-      alert("自定义 DoH 尚未测试通过，请先点击「测试」确认可用");
+      alert("DoH 尚未测试通过，请先点击「测试」确认可用");
       return;
     }
   }
@@ -350,10 +412,18 @@ function initControls() {
 }
 function updateCustomUI() {
   const p = $("provider").value;
-  const isCustom = p === "custom";
+  const isCustom = p === "custom" || p === "browser";
   // 显示/隐藏自定义 DoH 输入区（必须用 inline-flex 覆盖 CSS #customDohWrap { display: none }）
   $("customDohWrap").style.display = isCustom ? "inline-flex" : "none";
   $("customDoh").disabled = !isCustom;
+  // 不同模式给出对应占位提示
+  if (p === "browser") {
+    $("customDoh").placeholder = "https://内网地址/dns-query（自签需先信任）";
+  } else if (p === "custom") {
+    $("customDoh").placeholder = "https://公开 DoH 地址";
+  } else {
+    $("customDoh").placeholder = "https://...";
+  }
   if (!isCustom) {
     localStorage.removeItem("cf_custom_ok");
   }
@@ -368,14 +438,28 @@ function updateCustomUI() {
 }
 async function testCustomDoh() {
   const url = $("customDoh").value.trim();
-  if (!/^https:\\/\\//i.test(url)) { alert("自定义 DoH 必须是 https:// 开头的地址，不支持裸 UDP 53"); return; }
+  if (!url) { alert("请先填写 DoH 地址"); return; }
+  const isBrowserMode = $("provider").value === "browser";
+  if (!isBrowserMode && url.indexOf("https://") !== 0) {
+    alert("公开自定义 DoH 必须是 https:// 开头；内网自签请在「内网自签 DoH」模式下填写（不支持裸 UDP 53）");
+    return;
+  }
   $("testDoh").disabled = true;
   $("testDoh").textContent = "测试中…";
   $("start").disabled = true;
   try {
-    const r = await fetch("/api/test-doh?url=" + encodeURIComponent(url), { cache: "no-store" });
-    const data = await r.json();
-    if (data.ok) {
+    // 浏览器客户端直连测试（自签/内网地址由浏览器发起，可手动信任证书）
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(url + "?name=cloudflare.com&type=1", {
+      headers: { accept: "application/dns-json" },
+      signal: ctrl.signal,
+    });
+    clearTimeout(to);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const ok = (j.Answer || []).some((a) => a.type === 1 && typeof a.data === "string");
+    if (ok) {
       localStorage.setItem("cf_custom_ok", "1");
       saveCustomDoh(url);
       $("testDoh").textContent = "测试通过 ✓";
@@ -384,13 +468,15 @@ async function testCustomDoh() {
       localStorage.removeItem("cf_custom_ok");
       $("testDoh").textContent = "测试失败";
       $("start").disabled = true;
-      alert("测试失败：" + (data.msg || "未知错误"));
+      alert("测试失败：解析无结果");
     }
   } catch (e) {
     localStorage.removeItem("cf_custom_ok");
     $("testDoh").textContent = "测试失败";
     $("start").disabled = true;
-    alert("测试异常：" + e.message);
+    let msg = "测试异常：" + e.message;
+    if (isBrowserMode) msg += "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + url + " 并点「继续」）";
+    alert(msg);
   }
   setTimeout(() => { $("testDoh").textContent = "测试连接"; $("testDoh").disabled = false; }, 1500);
 }
@@ -414,6 +500,12 @@ initControls();
 
 export function html() {
   const options = providerOptions();
+  // 公开 DoH 地址映射（供浏览器客户端直连使用；custom/browser 用用户填写的地址）
+  const dohUrls = {};
+  DNS_PROVIDER_LIST.forEach((p) => {
+    if (p.doh && !p.browser) dohUrls[p.key] = p.doh;
+  });
+  const frontendJs = "const DOh_URLS = " + JSON.stringify(dohUrls) + ";\n" + FRONTEND_JS;
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -496,7 +588,7 @@ export function html() {
   <label>测速线程
     <input id="measureThreads" type="number" min="1" max="32" value="10">
   </label>
-  <span class="status" id="info">点击「开始测速」对每个域名测 3 轮（间隔 2 秒）取平均延迟，按综合排序</span>
+  <span class="status" id="info">DNS 解析除「本地」走服务端外，均由你的浏览器直连 DoH；测速对每个域名发 HTTPS 请求测 3 轮（间隔 2 秒）取平均，按综合排序</span>
 </div>
 
 <div class="wrap">
@@ -517,7 +609,7 @@ export function html() {
   </table>
 </div>
 
-<script>${FRONTEND_JS}</script>
+<script>${frontendJs}</script>
 </body>
 </html>`;
 }

@@ -4,8 +4,8 @@
  * 路由：
  *   GET /                        -> 返回 index.html 网页（page.js）
  *   GET /api/domains             -> 代理读取 GitHub 仓库最新的 cf_domains.txt（含更新时间）
- *   GET /api/resolve?domain=...  -> 解析域名 A 记录（支持 provider / customDoh 参数）
- *   GET /api/test-doh?url=...    -> 测试自定义 DoH 是否可用
+ *   GET /api/resolve?domain=...  -> 仅 "local" 服务端解析域名 A 记录（服务端视角）
+ *   GET /api/cf-check?ips=...    -> 判定 IP 是否落在 Cloudflare 网段（不解析 DNS）
  *   GET /api/health              -> 健康检查
  *
  * 测速逻辑放在浏览器端：网页对每个域名发起请求并计时，
@@ -13,11 +13,11 @@
  */
 
 import { html } from "./page.js";
-import { resolveIps, testDoh } from "./resolve.js";
+import { resolveIps, getCfRanges, isIpInCf } from "./resolve.js";
 
 // cf_domains.txt 在 GitHub 仓库的位置（main 分支）
 const RAW_DOMAINS_URL =
-  "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
+  "https://dl.lbcn.top/https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 
 function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -82,6 +82,7 @@ export default {
       const customDoh = (url.searchParams.get("customDoh") || "").trim();
       if (!domain) return json({ error: "缺少 domain 参数" }, 400);
       try {
+        // 仅 "local" 走服务端解析（服务端视角）；其余 DoH 由浏览器客户端直连
         const r = await resolveIps(domain, provider, customDoh);
         return json(r, 200, { "Cache-Control": "no-store" });
       } catch (e) {
@@ -89,11 +90,19 @@ export default {
       }
     }
 
-    if (path === "/api/test-doh") {
-      const u = (url.searchParams.get("url") || "").trim();
-      if (!u) return json({ ok: false, msg: "缺少 url 参数" }, 400);
-      const r = await testDoh(u);
-      return json(r, 200, { "Cache-Control": "no-store" });
+    if (path === "/api/cf-check") {
+      // 浏览器直连 DoH 解析出 IP 后，将 IP 交服务端判定是否落在 Cloudflare 网段。
+      // 服务端仅持有 CF 网段，不做任何 DNS 解析。
+      const ipParam = (url.searchParams.get("ips") || "").trim();
+      const ips = ipParam ? ipParam.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 100) : [];
+      try {
+        const ranges = await getCfRanges();
+        const cf = {};
+        for (const ip of ips) cf[ip] = isIpInCf(ip, ranges);
+        return json({ cf }, 200, { "Cache-Control": "no-store" });
+      } catch (e) {
+        return json({ error: String(e.message || e) }, 502);
+      }
     }
 
     return json({ error: "not found" }, 404);
