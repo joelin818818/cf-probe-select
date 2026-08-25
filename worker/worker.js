@@ -37,13 +37,20 @@ export default {
           return json({ error: "无法读取域名列表", status: res.status }, 502);
         }
         const text = await res.text();
-        const domains = text
-          .split(/\r?\n/)
-          .map((l) => l.trim())
+        const lines = text.split(/\r?\n/).map((l) => l.trim());
+        // 解析头部更新时间（如：# 更新时间：北京时间 2026-08-25 12:14:05 / 世界时间(UTC) 2026-08-25 04:14:05）
+        let updatedAt = "";
+        for (const l of lines) {
+          if (l.startsWith("# 更新时间：")) {
+            updatedAt = l.slice("# 更新时间：".length).trim();
+            break;
+          }
+        }
+        const domains = lines
           .filter((l) => l && !l.startsWith("#"))
           .map((l) => l.split("#")[0].trim().toLowerCase());
         return json(
-          { count: domains.length, domains },
+          { count: domains.length, domains, updatedAt },
           200,
           { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" }
         );
@@ -355,8 +362,9 @@ async function loadDomains() {
   });
   testing = false;
   document.getElementById("start").disabled = false;
-  document.getElementById("src").textContent =
-    "数据源：GitHub 自动探测累积（实时）· 共 " + domains.length + " 个域名";
+  const src = "数据源：GitHub 自动探测累积（实时）· 共 " + domains.length + " 个域名" +
+    (data.updatedAt ? " · 更新：" + data.updatedAt : "");
+  document.getElementById("src").textContent = src;
   render();
 }
 
