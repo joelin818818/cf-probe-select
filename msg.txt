@@ -1,6 +1,0 @@
-fix: DNS 服务商下拉排序与自定义 DoH 交互
-
-- 改用 DNS_PROVIDER_LIST 数组固定下拉顺序，解决 "360" 数字键排在首位导致「本地」不在第一的问题
-- 自定义 DoH 区域默认隐藏，选择 custom 后显示输入框与测试按钮
-- 选择自定义时「开始测速」按钮默认变灰禁用；测试通过 / 输入变更后自动更新按钮可用状态
-- 新增 normalizeProviderKey，兼容旧 localStorage 中的 "360" key
