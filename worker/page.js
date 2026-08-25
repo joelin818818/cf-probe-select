@@ -222,7 +222,6 @@ function stopTest() {
   stopRequested = true;
   setInfo("正在停止…");
 }
-}
 
 function copyAll() {
   const lines = sortRows().map((d) => d + (stateMap[d].avg != null ? "  # " + stateMap[d].avg + "ms" : ""));
