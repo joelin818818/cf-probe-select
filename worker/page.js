@@ -498,7 +498,7 @@ loadDomains();
 initControls();
 `;
 
-export function html() {
+export function html(version) {
   const options = providerOptions();
   // 公开 DoH 地址映射（供浏览器客户端直连使用；custom 用用户填写的地址）
   const dohUrls = {};
@@ -511,7 +511,7 @@ export function html() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CF 探测优选 · 实时测速</title>
+<title>CF 探测优选 v${version || ""}</title>
 <style>
   :root {
     --bg: #0d1117; --card: #161b22; --fg: #e6edf3; --line: #30363d; --muted: #9aa3b2;
@@ -565,7 +565,7 @@ export function html() {
 </head>
 <body>
 <header>
-  <h1>CF 探测优选 · 实时测速</h1>
+  <h1>CF 探测优选 v${version || ""}</h1>
   <span class="tag">Cloudflare</span>
   <span class="status" id="src">数据源：GitHub 自动探测累积</span>
 </header>
