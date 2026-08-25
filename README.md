@@ -21,6 +21,7 @@ CF 探测优选 —— 自动挖掘使用 Cloudflare 的第三方站点，并在
 IP 展示：
 - 每个域名解析前 3 个 A 记录 IP，并用 Cloudflare 官方 IPv4 CIDR 判定是否落在 CF 段（✓CF / ✗非CF）。
 - IP 列仅展示 IP 与 CF 判定，不再展示国家归属地。
+- `/api/resolve` 与前端均带 5 分钟解析缓存，减少重复 DoH 请求。
 
 本地预览：`wrangler dev`（从仓库根目录运行，根目录已有 `wrangler.toml`）。
 部署：`wrangler deploy`，或在 Cloudflare Dashboard 连接本仓库的 Git 自动部署（Worker 自动拉取最新代码）。
@@ -30,7 +31,11 @@ IP 展示：
 由 GitHub Actions 定时运行，广度优先爬取外链、累积走 Cloudflare 的域名并写入 `cf_domains.txt`。
 
 关键规则：
-- 多源 DNS 校验：用系统 DNS、字节 / 360 / 腾讯 / Google / Cloudflare 共 6 套 DoH 解析源做落盘前校验，解析失败的源忽略，仅当成功解析的源均落在 CF 段才保留（宽松版，抗单点抖动）。
+- 探测阶段快速判定：只认 IP 段硬过滤（单源系统 DNS），不判断 Server 头；CF IP 段用预合并区间 + 二分查找判定（O(log n)）。
+- 多源 DNS 校验：落盘前用系统 DNS、字节 / 360 / 腾讯 / Google / Cloudflare 共 6 套 DoH 解析源做严格校验，解析失败的源忽略，仅当成功解析的源均落在 CF 段才保留（宽松版，抗单点抖动）。
+- 探测阶段解析结果缓存，落盘前复用；缓存 IP 含非 CF 段直接剔除，避免重复多源解析。
+- 全局 `requests.Session()` 复用 TCP/TLS 连接；`get_registered_domain()` 用 `lru_cache` 缓存。
+- 探测与扩散并发执行（检测+扩散打包为单个任务在线程池运行），并加锁保护共享状态，提高 CPU/IO 利用率。
 - 落盘前用 Cloudflare 官方最新 IPv4 CIDR 硬过滤，剔除非 CF 域名。
 - 同一主域名最多保留 3 个子域名。
 - 总量控制（≤ 400）：落盘前若超出 400 个域名，主域配额依次从 3 动态收紧到 2、再到 1；若配额收到 1 仍超限（即不同主域 > 400），在 Actions 内部对所有域名做延迟测速（GitHub 机房 → CF 节点），按延迟升序仅保留最快前 400 个，不可达域名沉底。
