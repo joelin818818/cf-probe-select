@@ -485,9 +485,13 @@ def run_cf_explorer():
     def _flush_all():
         filter_non_cf_domains(saved, root_sub_count)
         try:
+            # 北京时间 = UTC+8
+            bj = time.localtime(time.time() + 8 * 3600)
+            bj_str = time.strftime("%Y-%m-%d %H:%M:%S", bj)
+            utc_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
             with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-                f.write("# CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积）\n")
-                f.write("# 由脚本自动更新，请勿手动编辑\n")
+                f.write("# CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积，脚本自动更新请勿手动编辑）\n")
+                f.write(f"# 更新时间：北京时间 {bj_str} / 世界时间(UTC) {utc_str}\n")
                 for d in sorted(saved):
                     f.write(d + "\n")
             print(f"[*] 已全量写回 {len(saved)} 个域名 -> {OUTPUT_FILE}")

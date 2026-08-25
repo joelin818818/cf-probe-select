@@ -1,5 +1,5 @@
-# CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积）
-# 由脚本自动更新，请勿手动编辑
+# CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积，脚本自动更新请勿手动编辑）
+# 更新时间：北京时间 2026-08-25 00:00:00 / 世界时间(UTC) 2026-08-24 16:00:00
 53.fs1.hubspotusercontent-na1.net
 7052064.fs1.hubspotusercontent-na1.net
 acsbap.com
