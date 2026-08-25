@@ -409,6 +409,15 @@ function sortRows() {
   return arr;
 }
 
+// 转义用于 HTML 属性值/文本的内容，防止域名中含 " < > & 破坏结构
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function render() {
   const rows = sortRows();
   const best = rows.find((d) => stateMap[d] && stateMap[d].status === "ok" && stateMap[d].avg != null);
@@ -419,9 +428,9 @@ function render() {
     const cls = [];
     if ((ipMap[d] || []).length && !(ipMap[d] || []).every((x) => x.isCf)) cls.push("warn-row");
     const bestCls = d === best ? "best" : "";
-    html += '<tr class="row ' + cls.join(" ") + '" data-d="' + d + '">';
+    html += '<tr class="row ' + cls.join(" ") + '" data-d="' + esc(d) + '">';
     html += '<td class="rank">' + (bestCls ? "★" : i + 1) + "</td>";
-    html += "<td>" + d + "</td>";
+    html += "<td>" + esc(d) + "</td>";
     html += "<td>" + ipHtml(d) + "</td>";
     html += "<td>" + cfHtml(d) + "</td>";
     html += "<td>" + latHtml(d) + "</td>";
