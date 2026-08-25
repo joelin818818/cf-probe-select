@@ -1,5 +1,0 @@
-fix: 自定义 DoH 输入框不显示 + 域名列表加载失败无提示
-
-- 修复 #customDohWrap 显示 bug：设置 style.display = "inline-flex" 覆盖 CSS 默认隐藏，避免 ID 选择器优先级导致输入框永远隐藏
-- loadDomains 增加 try/catch 错误处理，失败时重试 2 次，最终把错误信息显示在页面上
-- 加载失败时不再卡 loading，而是提示"加载失败，请刷新重试"
