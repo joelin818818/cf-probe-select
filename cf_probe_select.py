@@ -175,6 +175,8 @@ MAX_SUBDOMAINS_PER_ROOT = 3
 MAX_NEW_PER_RUN = 200
 PROBE_TIME_LIMIT = 600
 MAX_NEW_PER_PAGE = 50
+TOTAL_CAP = 400          # 落盘域名总量硬上限
+LATENCY_TIMEOUT = 3      # Actions 内部测速单域名超时（秒）
 
 IGNORE_EXTENSIONS = (
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".css", ".js",
@@ -423,6 +425,52 @@ def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
         print("[*] 落盘前校验通过，未发现非 CF 域名")
 
 
+def _trim_by_root_quota(saved: set, root_sub_count: defaultdict, quota: int) -> int:
+    """将每主域名下的子域数量收紧到 quota（按字母序保留前 quota 个）。原地修改 saved 与 root_sub_count，返回新数量。"""
+    groups = defaultdict(list)
+    for d in saved:
+        groups[get_registered_domain(d)].append(d)
+    new_saved = set()
+    for root, subs in groups.items():
+        for d in sorted(subs)[:quota]:
+            new_saved.add(d)
+    saved.clear()
+    saved.update(new_saved)
+    root_sub_count.clear()
+    for d in new_saved:
+        root_sub_count[get_registered_domain(d)] += 1
+    return len(new_saved)
+
+
+def _trim_by_latency(saved: set, root_sub_count: defaultdict, cap: int) -> int:
+    """当域名数超出 cap 且主域配额已收到 1 仍超限时，在 GitHub Actions 内部对每个域名做延迟测速，
+    按延迟升序仅保留前 cap 个（不可达域名沉底）。原地修改 saved 与 root_sub_count，返回新数量。"""
+    domains = sorted(saved)
+    print(f"[*] 启动 Actions 内部延迟测速（GitHub 机房→CF 节点），共 {len(domains)} 个域名，仅保留最快前 {cap} 个...")
+
+    def _one(d):
+        try:
+            t0 = time.time()
+            requests.head("https://" + d, headers=HEADERS, timeout=LATENCY_TIMEOUT, allow_redirects=True)
+            return d, time.time() - t0
+        except Exception:
+            return d, None
+
+    lats = {}
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for d, lt in pool.map(_one, domains):
+            lats[d] = lt if lt is not None else float("inf")
+    ordered = sorted(domains, key=lambda d: (lats[d], d))
+    keep = set(ordered[:cap])
+    saved.clear()
+    saved.update(keep)
+    root_sub_count.clear()
+    for d in keep:
+        root_sub_count[get_registered_domain(d)] += 1
+    print(f"[*] 延迟测速完成，保留 {len(keep)} 个（已按延迟排序），移除 {len(domains) - len(keep)} 个较慢/不可达域名")
+    return len(keep)
+
+
 def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
     domains = set()
     clean_text = html.unescape(raw_content)
@@ -484,6 +532,17 @@ def run_cf_explorer():
 
     def _flush_all():
         filter_non_cf_domains(saved, root_sub_count)
+        # ==================== 数量控制：总量 ≤ TOTAL_CAP ====================
+        if len(saved) > TOTAL_CAP:
+            print(f"[*] 域名总数 {len(saved)} 超出上限 {TOTAL_CAP}，动态收紧主域名配额")
+            for quota in (2, 1):
+                n = _trim_by_root_quota(saved, root_sub_count, quota)
+                print(f"    [配额] 每主域保留 {quota} 个 -> 剩余 {n} 个")
+                if n <= TOTAL_CAP:
+                    break
+            # 配额已收到 1 仍超限（即不同主域 > 400），启动 Actions 内部延迟测速截断到前 400
+            if len(saved) > TOTAL_CAP:
+                _trim_by_latency(saved, root_sub_count, TOTAL_CAP)
         try:
             # 北京时间 = UTC+8
             bj = time.localtime(time.time() + 8 * 3600)
