@@ -38,7 +38,7 @@ function loadCustomDoh() {
 function saveProvider(p) { localStorage.setItem("cf_provider", p); }
 function saveCustomDoh(u) { localStorage.setItem("cf_custom_doh", u); }
 function loadResolveThreads() {
-  return Math.max(1, parseInt(localStorage.getItem("cf_rthreads") || "8", 10) || 8);
+  return Math.max(1, parseInt(localStorage.getItem("cf_rthreads") || "16", 10) || 16);
 }
 function loadMeasureThreads() {
   return Math.max(1, parseInt(localStorage.getItem("cf_mthreads") || "10", 10) || 10);
@@ -364,7 +364,7 @@ $("refresh").addEventListener("click", async () => { await loadDomains(); setInf
 $("copyAll").addEventListener("click", copyAll);
 $("provider").addEventListener("change", (e) => { saveProvider(e.target.value); updateCustomUI(); });
 $("customDoh").addEventListener("input", (e) => { saveCustomDoh(e.target.value); localStorage.removeItem("cf_custom_ok"); updateCustomUI(); });
-$("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parseInt(e.target.value, 10) || 8); });
+$("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parseInt(e.target.value, 10) || 16); });
 $("measureThreads").addEventListener("change", (e) => { saveMeasureThreads(parseInt(e.target.value, 10) || 10); });
 $("testDoh").addEventListener("click", testCustomDoh);
 document.querySelectorAll("th[data-sort]").forEach((th) => {
@@ -453,7 +453,7 @@ export function html() {
     <button id="testDoh" class="ghost">测试连接</button>
   </label>
   <label>解析线程
-    <input id="resolveThreads" type="number" min="1" max="32" value="8">
+    <input id="resolveThreads" type="number" min="1" max="32" value="16">
   </label>
   <label>测速线程
     <input id="measureThreads" type="number" min="1" max="32" value="10">
