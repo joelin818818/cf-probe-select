@@ -1,6 +1,6 @@
 // 前端页面模块：返回完整的 HTML 页面字符串（含内联前端脚本）
 // DNS 服务商列表从 worker.js 导入（全仓库唯一来源，避免多处维护不一致）
-import { DNS_PROVIDER_LIST, normalizeProviderKey } from "./worker.js";
+import { DNS_PROVIDER_LIST } from "./worker.js";
 
 // 生成 DNS 服务商下拉选项（按数组顺序）
 function providerOptions() {
@@ -27,6 +27,13 @@ let measuredCount = 0;      // 测速完成计数
 const $ = (id) => document.getElementById(id);
 const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "状态", score: "综合" };
 
+// 浏览器端本地函数：兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key
+// （注意：本脚本是浏览器内联脚本，无 import，故在此自包含定义）
+function normalizeProviderKey(key) {
+  if (key === "360") return "qihoo360";
+  const valid = ["local","aliyun","tencent","qihoo360","google","cloudflare","opendns","custom"];
+  return valid.indexOf(key) >= 0 ? key : "local";
+}
 function loadProvider() {
   return normalizeProviderKey(localStorage.getItem("cf_provider"));
 }
