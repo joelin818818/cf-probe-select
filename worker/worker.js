@@ -276,7 +276,7 @@ function html() {
       <tr>
         <th class="rank">#</th>
         <th data-sort="domain">域名</th>
-        <th data-sort="ip">IP（前 3 · 含延迟）</th>
+        <th data-sort="ip">IP（前 3）</th>
         <th data-sort="cf">CF IP</th>
         <th data-sort="lat">延迟 (ms)</th>
         <th data-sort="status">状态</th>
@@ -412,6 +412,7 @@ function sortFn(a, b) {
   return orderIndex[a] - orderIndex[b];
 }
 
+// 对目标（此处为域名）发起 HTTPS HEAD 请求并计时，返回延迟(ms) / "timeout" / "err"
 async function measureOne(target) {
   const t0 = performance.now();
   try {
@@ -431,7 +432,7 @@ async function measureOne(target) {
   }
 }
 
-// 方案 B：对每个解析出的 IP 各自测 3 轮取平均，域名延迟 = 各 IP 延迟的平均
+// 域名测速：用 https://域名 实测（证书合法，浏览器允许），对域名本身测 3 轮取平均
 async function measure(domain) {
   stateMap[domain].phase = "measuring";
   const list = ipMap[domain] || [];
@@ -440,30 +441,18 @@ async function measure(domain) {
     return;
   }
   const ROUNDS = 3;
-  let allTimes = [];
+  const times = [];
   let hadTimeout = false;
   let hadErr = false;
-
-  for (const item of list) {
-    item.lat = undefined; // 清除上轮结果，避免显示旧值
-    const times = [];
-    for (let i = 0; i < ROUNDS; i++) {
-      const r = await measureOne(item.ip);
-      if (typeof r === "number") times.push(r);
-      else if (r === "timeout") hadTimeout = true;
-      else hadErr = true;
-    }
-    // 该 IP 的延迟（取 3 轮有效平均；全失败则标记）
-    if (times.length > 0) {
-      item.lat = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
-      allTimes.push(item.lat);
-    } else {
-      item.lat = null;
-    }
+  for (let i = 0; i < ROUNDS; i++) {
+    const r = await measureOne(domain); // 改用域名实测，而非裸 IP（避免证书/Mixed Content 阻止）
+    if (typeof r === "number") times.push(r);
+    else if (r === "timeout") hadTimeout = true;
+    else hadErr = true;
   }
-
-  if (allTimes.length > 0) {
-    const avg = Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length);
+  // 该域名的延迟（取 3 轮有效平均；全失败则标记）
+  if (times.length > 0) {
+    const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
     stateMap[domain] = { phase: "done", lat: avg, status: "ok" };
   } else if (hadTimeout) {
     stateMap[domain] = { phase: "done", lat: TIMEOUT, status: "timeout" };
