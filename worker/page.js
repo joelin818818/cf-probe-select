@@ -51,13 +51,22 @@ function saveMeasureThreads(n) { localStorage.setItem("cf_mthreads", String(n));
 function setInfo(msg) { $("info").textContent = msg; }
 
 async function loadDomains(attempt = 1) {
+  let t;
   try {
+    $("src").textContent = "数据源：GitHub 自动探测累积（实时）· 加载中…";
+    $("tbody").innerHTML = '<tr><td colspan="6" class="empty">加载中…' + (attempt > 1 ? "（第 " + attempt + " 次重试）" : "") + "</td></tr>";
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 15000);
+    t = setTimeout(() => ctrl.abort(), 15000);
     const r = await fetch("/api/domains", { cache: "no-store", signal: ctrl.signal });
-    clearTimeout(t);
+    clearTimeout(t); t = null;
     if (!r.ok) throw new Error("HTTP " + r.status);
-    const data = await r.json();
+    let data;
+    try {
+      data = await r.json();
+    } catch (jsonErr) {
+      const snippet = (await r.text()).slice(0, 80);
+      throw new Error("返回不是 JSON（可能是 Cloudflare 挑战页）：" + snippet);
+    }
     if (data.error) throw new Error(data.error);
     domains = data.domains || [];
     ipMap = {}; stateMap = {}; orderIndex = {};
@@ -67,20 +76,24 @@ async function loadDomains(attempt = 1) {
       orderIndex[d] = i;
     });
     testing = false;
-    if (!testing) $("start").disabled = false;
+    $("start").disabled = false;
     const src = "数据源：GitHub 自动探测累积（实时）· 共 " + domains.length + " 个域名" +
       (data.updatedAt ? " · 更新：" + data.updatedAt : "");
     $("src").textContent = src;
     render();
   } catch (e) {
+    if (t) { clearTimeout(t); t = null; }
     console.error("loadDomains failed:", e);
     if (attempt <= 2) {
       setInfo("域名列表加载失败，2秒后重试… (" + e.message + ")");
       setTimeout(() => loadDomains(attempt + 1), 2000);
     } else {
       $("src").textContent = "数据源：GitHub 自动探测累积（加载失败，请刷新重试）";
-      $("tbody").innerHTML = '<tr><td colspan="6" class="empty">加载失败：' + e.message + "</td></tr>";
+      $("tbody").innerHTML = '<tr><td colspan="6" class="empty">加载失败：' + e.message +
+        ' <button id="retryLoad" class="ghost">重试加载</button></td></tr>';
       $("start").disabled = false;
+      const btn = $("retryLoad");
+      if (btn) btn.addEventListener("click", () => loadDomains(1));
     }
   }
 }
@@ -453,6 +466,20 @@ $("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parse
 $("measureThreads").addEventListener("change", (e) => { saveMeasureThreads(parseInt(e.target.value, 10) || 10); });
 document.querySelectorAll("th[data-sort]").forEach((th) => {
   th.addEventListener("click", () => { sortMode = th.getAttribute("data-sort"); render(); });
+});
+
+// 全局错误兜底：任何未捕获异常都写到表格里，方便用户截图反馈
+window.addEventListener("error", (e) => {
+  console.error(e);
+  const msg = "JS 运行时错误：" + (e.message || e.error || "未知");
+  setInfo(msg);
+  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="6" class="empty err">' + msg + "</td></tr>";
+});
+window.addEventListener("unhandledrejection", (e) => {
+  console.error(e);
+  const msg = "未处理的 Promise 错误：" + (e.reason && e.reason.message ? e.reason.message : String(e.reason));
+  setInfo(msg);
+  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="6" class="empty err">' + msg + "</td></tr>";
 });
 
 loadDomains();
