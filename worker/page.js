@@ -1,10 +1,10 @@
 // 前端页面模块：返回完整的 HTML 页面字符串（含内联前端脚本）
 import { DNS_PROVIDERS } from "./dns-providers.js";
 
-// 生成 DNS 服务商下拉选项
+// 生成 DNS 服务商下拉选项（按数组顺序）
 function providerOptions() {
-  return Object.entries(DNS_PROVIDERS)
-    .map(([k, v]) => '<option value="' + k + '">' + v.label + "</option>")
+  return DNS_PROVIDER_LIST
+    .map((p) => '<option value="' + p.key + '">' + p.label + "</option>")
     .join("");
 }
 
@@ -24,8 +24,13 @@ let measuredCount = 0;      // 测速完成计数
 const $ = (id) => document.getElementById(id);
 const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "状态", score: "综合" };
 
+const PROVIDER_KEYS = ["local","aliyun","tencent","qihoo360","google","cloudflare","opendns","custom"];
+function normalizeProviderKey(k) {
+  if (k === "360") return "qihoo360";
+  return PROVIDER_KEYS.indexOf(k) >= 0 ? k : "local";
+}
 function loadProvider() {
-  return localStorage.getItem("cf_provider") || "local";
+  return normalizeProviderKey(localStorage.getItem("cf_provider"));
 }
 function loadCustomDoh() {
   return localStorage.getItem("cf_custom_doh") || "";
@@ -303,23 +308,34 @@ function initControls() {
   $("provider").value = p;
   const cd = loadCustomDoh();
   $("customDoh").value = cd;
-  $("customDoh").disabled = p !== "custom";
   $("resolveThreads").value = loadResolveThreads();
   $("measureThreads").value = loadMeasureThreads();
-  toggleCustomTest();
+  updateCustomUI();
 }
-function toggleCustomTest() {
+function updateCustomUI() {
   const p = $("provider").value;
   const isCustom = p === "custom";
+  // 显示/隐藏自定义 DoH 输入区
+  $("customDohWrap").style.display = isCustom ? "" : "none";
   $("customDoh").disabled = !isCustom;
-  $("testDoh").style.display = isCustom ? "" : "none";
-  if (!isCustom) { localStorage.removeItem("cf_custom_ok"); }
+  if (!isCustom) {
+    localStorage.removeItem("cf_custom_ok");
+  }
+  // 自定义未通过测试时，禁用开始测速按钮
+  if (isCustom) {
+    const url = $("customDoh").value.trim();
+    const ok = url && localStorage.getItem("cf_custom_ok") === "1";
+    $("start").disabled = !ok;
+  } else {
+    $("start").disabled = false;
+  }
 }
 async function testCustomDoh() {
   const url = $("customDoh").value.trim();
   if (!/^https:\\/\\//i.test(url)) { alert("自定义 DoH 必须是 https:// 开头的地址，不支持裸 UDP 53"); return; }
   $("testDoh").disabled = true;
   $("testDoh").textContent = "测试中…";
+  $("start").disabled = true;
   try {
     const r = await fetch("/api/test-doh?url=" + encodeURIComponent(url), { cache: "no-store" });
     const data = await r.json();
@@ -327,14 +343,17 @@ async function testCustomDoh() {
       localStorage.setItem("cf_custom_ok", "1");
       saveCustomDoh(url);
       $("testDoh").textContent = "测试通过 ✓";
+      $("start").disabled = false;
     } else {
       localStorage.removeItem("cf_custom_ok");
       $("testDoh").textContent = "测试失败";
+      $("start").disabled = true;
       alert("测试失败：" + (data.msg || "未知错误"));
     }
   } catch (e) {
     localStorage.removeItem("cf_custom_ok");
     $("testDoh").textContent = "测试失败";
+    $("start").disabled = true;
     alert("测试异常：" + e.message);
   }
   setTimeout(() => { $("testDoh").textContent = "测试连接"; $("testDoh").disabled = false; }, 1500);
@@ -343,8 +362,8 @@ async function testCustomDoh() {
 $("start").addEventListener("click", startTest);
 $("refresh").addEventListener("click", async () => { await loadDomains(); setInfo("已刷新域名列表"); });
 $("copyAll").addEventListener("click", copyAll);
-$("provider").addEventListener("change", (e) => { saveProvider(e.target.value); toggleCustomTest(); });
-$("customDoh").addEventListener("change", (e) => { saveCustomDoh(e.target.value); localStorage.removeItem("cf_custom_ok"); });
+$("provider").addEventListener("change", (e) => { saveProvider(e.target.value); updateCustomUI(); });
+$("customDoh").addEventListener("input", (e) => { saveCustomDoh(e.target.value); localStorage.removeItem("cf_custom_ok"); updateCustomUI(); });
 $("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parseInt(e.target.value, 10) || 8); });
 $("measureThreads").addEventListener("change", (e) => { saveMeasureThreads(parseInt(e.target.value, 10) || 10); });
 $("testDoh").addEventListener("click", testCustomDoh);
@@ -376,6 +395,7 @@ export function html() {
   header .tag { font-size: 12px; color: var(--accent); border: 1px solid var(--accent); padding: 2px 8px; border-radius: 999px; }
   .bar { padding: 10px 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: var(--card); }
   .bar label { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+  #customDohWrap { display: none; }
   .bar input, .bar select { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: 13px; }
   .bar input[type=number] { width: 56px; }
   button { background: var(--accent); color: #fff; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
@@ -428,9 +448,9 @@ export function html() {
   <label>DNS 服务商
     <select id="provider">${options}</select>
   </label>
-  <label style="display:none">自定义 DoH
+  <label id="customDohWrap">自定义 DoH
     <input id="customDoh" type="text" placeholder="https://..." size="28">
-    <button id="testDoh" class="ghost" style="display:none">测试连接</button>
+    <button id="testDoh" class="ghost">测试连接</button>
   </label>
   <label>解析线程
     <input id="resolveThreads" type="number" min="1" max="32" value="8">

@@ -8,43 +8,21 @@
 // - "custom" 为自定义 DoH（HTTPS）地址，仅接受 https:// 开头的 DoH URL，
 //   不支持裸 UDP 53（Worker/Browser 的 fetch 无法发 UDP 包）。
 
-export const DNS_PROVIDERS = {
-  local: {
-    label: "本地（服务端 DNS）",
-    // 空字符串表示使用 Worker 默认递归（不指定 DoH）
-    doh: "",
-    note: "服务端运行环境默认递归解析",
-  },
-  aliyun: {
-    label: "阿里 DoH",
-    doh: "https://dns.alidns.com/dns-query",
-  },
-  tencent: {
-    label: "腾讯 DoH",
-    doh: "https://doh.pub/dns-query",
-  },
-  "360": {
-    label: "360 DoH",
-    doh: "https://doh.360.cn/dns-query",
-  },
-  google: {
-    label: "Google DoH",
-    doh: "https://dns.google/dns-query",
-  },
-  cloudflare: {
-    label: "Cloudflare DoH",
-    doh: "https://1.1.1.1/dns-query",
-  },
-  opendns: {
-    label: "OpenDNS DoH",
-    doh: "https://doh.opendns.com/dns-query",
-  },
-  custom: {
-    label: "自定义 DoH",
-    doh: "", // 由前端传入 customDoh
-    custom: true,
-  },
-};
+// 用数组固定下拉顺序（对象在含数字键 "360" 时枚举顺序会乱）
+export const DNS_PROVIDER_LIST = [
+  { key: "local", label: "本地（服务端 DNS）", doh: "", note: "服务端运行环境默认递归解析" },
+  { key: "aliyun", label: "阿里 DoH", doh: "https://dns.alidns.com/dns-query" },
+  { key: "tencent", label: "腾讯 DoH", doh: "https://doh.pub/dns-query" },
+  { key: "qihoo360", label: "360 DoH", doh: "https://doh.360.cn/dns-query" },
+  { key: "google", label: "Google DoH", doh: "https://dns.google/dns-query" },
+  { key: "cloudflare", label: "Cloudflare DoH", doh: "https://1.1.1.1/dns-query" },
+  { key: "opendns", label: "OpenDNS DoH", doh: "https://doh.opendns.com/dns-query" },
+  { key: "custom", label: "自定义 DoH", doh: "", custom: true },
+];
+
+export const DNS_PROVIDERS = Object.fromEntries(
+  DNS_PROVIDER_LIST.map((p) => [p.key, p])
+);
 
 // 按顺序返回候选 DoH 列表：优先用户所选，失败回退阿里+腾讯兜底
 export function resolveDohList(provider, customDoh) {
@@ -62,4 +40,10 @@ export function resolveDohList(provider, customDoh) {
     list.push("https://doh.pub/dns-query");
   }
   return list;
+}
+
+// 兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key
+export function normalizeProviderKey(key) {
+  if (key === "360") return "qihoo360";
+  return DNS_PROVIDERS[key] ? key : "local";
 }
