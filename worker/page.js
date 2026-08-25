@@ -51,7 +51,10 @@ function setInfo(msg) { $("info").textContent = msg; }
 
 async function loadDomains(attempt = 1) {
   try {
-    const r = await fetch("/api/domains", { cache: "no-store" });
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 15000);
+    const r = await fetch("/api/domains", { cache: "no-store", signal: ctrl.signal });
+    clearTimeout(t);
     if (!r.ok) throw new Error("HTTP " + r.status);
     const data = await r.json();
     if (data.error) throw new Error(data.error);

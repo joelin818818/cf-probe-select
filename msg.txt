@@ -1,0 +1,5 @@
+fix: 域名列表加载增加超时控制
+
+- Worker 侧 /api/domains 读取 GitHub raw 增加 10 秒超时，超时返回明确错误信息
+- 前端 loadDomains 增加 15 秒 AbortController 超时，超时会触发 catch 并在页面上显示"加载失败"提示
+- 避免 GitHub raw 响应慢或连接挂起导致页面一直卡在"加载中…"

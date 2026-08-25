@@ -44,7 +44,15 @@ export default {
     if (path === "/api/domains") {
       // 加时间戳绕过 raw.githubusercontent.com CDN 缓存，确保实时
       const nocacheUrl = RAW_DOMAINS_URL + "?t=" + Date.now();
-      const res = await fetch(nocacheUrl, { cf: { cacheTtl: 0 } });
+      let res;
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        res = await fetch(nocacheUrl, { cf: { cacheTtl: 0 }, signal: ctrl.signal });
+        clearTimeout(t);
+      } catch (e) {
+        return json({ error: "读取域名列表超时，请重试", detail: String(e.message || e) }, 504);
+      }
       if (!res.ok) {
         return json({ error: "无法读取域名列表", status: res.status }, 502);
       }
