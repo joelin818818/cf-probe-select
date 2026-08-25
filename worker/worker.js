@@ -16,8 +16,9 @@ import { html } from "./page.js";
 import { resolveIps, getCfRanges, isIpInCf } from "./resolve.js";
 
 // cf_domains.txt 在 GitHub 仓库的位置（main 分支）
+// 直接走 GitHub 官方 raw 域名，避免第三方代理（dl.lbcn.top 等）失效导致读取不到列表
 const RAW_DOMAINS_URL =
-  "https://dl.lbcn.top/https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
+  "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 
 function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
