@@ -1,5 +1,6 @@
 // 前端页面模块：返回完整的 HTML 页面字符串（含内联前端脚本）
-import { DNS_PROVIDERS, DNS_PROVIDER_LIST } from "./dns-providers.js";
+// DNS 服务商列表从 worker.js 导入（全仓库唯一来源，避免多处维护不一致）
+import { DNS_PROVIDER_LIST, normalizeProviderKey } from "./worker.js";
 
 // 生成 DNS 服务商下拉选项（按数组顺序）
 function providerOptions() {
@@ -26,11 +27,6 @@ let measuredCount = 0;      // 测速完成计数
 const $ = (id) => document.getElementById(id);
 const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "状态", score: "综合" };
 
-const PROVIDER_KEYS = ["local","aliyun","tencent","qihoo360","google","cloudflare","opendns","custom"];
-function normalizeProviderKey(k) {
-  if (k === "360") return "qihoo360";
-  return PROVIDER_KEYS.indexOf(k) >= 0 ? k : "local";
-}
 function loadProvider() {
   return normalizeProviderKey(localStorage.getItem("cf_provider"));
 }
@@ -228,14 +224,14 @@ async function preflightCheck() {
   try {
     const ips = await browserDohResolve(doh, "cloudflare.com");
     if (!ips.length) {
-      alert("该 DoH 无法解析出 IP（可能地址不正确、网络被拦截，或浏览器 CORS 限制）：\n" + doh + "\n请更换其他 DNS 服务商或检查网络");
+      alert("该 DoH 无法解析出 IP（可能地址不正确、网络被拦截，或浏览器 CORS 限制）：\\n" + doh + "\\n请更换其他 DNS 服务商或检查网络");
       return false;
     }
     return true;
   } catch (e) {
     let extra = "";
-    if (provider === "custom") extra = "\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + doh + " 并点「继续」）";
-    alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\n" + doh + "\n错误：" + e.message + extra + "\n请更换其他 DNS 服务商");
+    if (provider === "custom") extra = "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + doh + " 并点「继续」）";
+    alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\\n" + doh + "\\n错误：" + e.message + extra + "\\n请更换其他 DNS 服务商");
     return false;
   }
 }

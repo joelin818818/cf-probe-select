@@ -1,6 +1,10 @@
 /**
  * cf-probe-select 测速前端 Worker（原生 ES Module，无需构建）
  *
+ * 本文件合并了原 worker.js（路由入口）、resolve.js（解析与 Cloudflare 网段判定）、
+ * dns-providers.js（DNS 服务商映射）。page.js 仅负责生成 HTML，DNS 列表从此处导出，
+ * 全仓库只定义一处，避免多处维护不一致。
+ *
  * 路由：
  *   GET /                        -> 返回 index.html 网页（page.js）
  *   GET /api/domains             -> 代理读取 GitHub 仓库最新的 cf_domains.txt（含更新时间）
@@ -13,17 +17,173 @@
  */
 
 import { html } from "./page.js";
-import { resolveIps, getCfRanges, isIpInCf } from "./resolve.js";
 
+// ====================================================================
+// DNS 服务商映射表（全仓库唯一来源，page.js 从此处导入）
+// ====================================================================
+// 架构约定（2026-08-25 用户确认）：
+// - 除 "local" 外，所有 DoH 解析都【由浏览器客户端直接发起】（含自定义/内网自签）。
+//   原因：Cloudflare Worker 的 fetch 只能访问公网且必须受信 CA 证书，无法连内网 / 自签
+//   DoH；而浏览器可手动信任自签证书、可访问同局域网地址。
+// - "local" 由 Worker 自己发起解析（服务端视角），代表「服务端 -> 域名」的解析结果。
+// - 公开 DoH（aliyun/tencent/...）的 doh 字段供浏览器侧直接使用。
+// - "custom" = 用户填写的 DoH 地址，浏览器直连；支持公开 https DoH，也支持内网自签
+//   https DoH（自签证书需先在浏览器手动信任该地址）。无需区分"公开/内网自签"两个选项，
+//   二者代码路径完全一致，仅证书信任方式不同。
+
+// 用数组固定下拉顺序（对象在含数字键 "360" 时枚举顺序会乱）
+export const DNS_PROVIDER_LIST = [
+  { key: "local", label: "本地（服务端 DNS）", doh: "", note: "服务端运行环境默认递归解析" },
+  { key: "aliyun", label: "阿里 DoH", doh: "https://dns.alidns.com/dns-query" },
+  { key: "tencent", label: "腾讯 DoH", doh: "https://doh.pub/dns-query" },
+  { key: "qihoo360", label: "360 DoH", doh: "https://doh.360.cn/dns-query" },
+  { key: "google", label: "Google DoH", doh: "https://dns.google/dns-query" },
+  { key: "cloudflare", label: "Cloudflare DoH", doh: "https://1.1.1.1/dns-query" },
+  { key: "opendns", label: "OpenDNS DoH", doh: "https://doh.opendns.com/dns-query" },
+  { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },
+];
+
+export const DNS_PROVIDERS = Object.fromEntries(
+  DNS_PROVIDER_LIST.map((p) => [p.key, p])
+);
+
+// 兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key
+export function normalizeProviderKey(key) {
+  if (key === "360") return "qihoo360";
+  return DNS_PROVIDERS[key] ? key : "local";
+}
+
+// 仅用于 "local"（服务端解析）：返回服务端使用的 DoH 列表。
+// 其他 provider 均由浏览器客户端直连，不再经过本函数（见 page.js 的浏览器解析分支）。
+function resolveDohList(provider, customDoh) {
+  if (provider === "local") {
+    // 服务端 Worker 自行发起（边缘节点的递归解析器，代表服务端视角）
+    return ["https://1.1.1.1/dns-query"];
+  }
+  const list = [];
+  if (provider === "custom") {
+    if (customDoh && /^https:\/\//i.test(customDoh.trim())) list.push(customDoh.trim());
+  } else if (provider && DNS_PROVIDERS[provider] && DNS_PROVIDERS[provider].doh) {
+    list.push(DNS_PROVIDERS[provider].doh);
+  }
+  return list; // 非空表示浏览器直连模式（前端不调用此函数解析）
+}
+
+// ====================================================================
+// Cloudflare IP 段（缓存）
+// ====================================================================
+let CF_RANGES = null;
+let CF_LOAD_TS = 0;
+const CF_TTL = 6 * 60 * 60 * 1000;
+
+async function getCfRanges() {
+  const now = Date.now();
+  if (CF_RANGES && now - CF_LOAD_TS < CF_TTL) return CF_RANGES;
+  let ranges = [];
+  try {
+    const r = await fetch("https://www.cloudflare.com/ips-v4", { cf: { cacheTtl: 3600 } });
+    if (r.ok) {
+      const t = await r.text();
+      ranges = t.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      CF_RANGES = ranges;
+      CF_LOAD_TS = now;
+    }
+  } catch (e) {
+    ranges = CF_RANGES || [];
+  }
+  return ranges;
+}
+
+// 判断某 IPv4 是否落在 CF 网段（支持 a.b.c.d/n）
+function ipToLong(ip) {
+  const p = ip.split(".").map(Number);
+  return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3];
+}
+function isIpInCf(ip, ranges) {
+  if (!ranges || !ranges.length) return true; // 段未加载时放行，避免误杀
+  const long = ipToLong(ip);
+  for (const cidr of ranges) {
+    const [net, bits] = cidr.split("/");
+    const mask = bits ? (0xffffffff << (32 - Number(bits))) >>> 0 : 0xffffffff;
+    if ((ipToLong(net) & mask) === (long & mask)) return true;
+  }
+  return false;
+}
+
+function getAFromAnswer(ans, wantV6) {
+  for (const a of ans || []) {
+    if (a.type === 1 && !wantV6) return a.data;
+    if (a.type === 28 && wantV6) return a.data;
+  }
+  return null;
+}
+
+async function dohFetch(doh, domain, wantV6) {
+  const url = doh + "?name=" + encodeURIComponent(domain) + "&type=" + (wantV6 ? 28 : 1);
+  const r = await fetch(url, {
+    headers: { accept: "application/dns-json" },
+    cf: { cacheTtl: 60 },
+  });
+  if (!r.ok) throw new Error("DoH " + r.status);
+  const j = await r.json();
+  const ip = getAFromAnswer(j.Answer, wantV6);
+  return ip ? [ip] : [];
+}
+
+// 解析域名 A 记录（支持多 DoH 兜底），返回 { ips, doh, cf }
+async function dohResolve(domain, provider, customDoh) {
+  const list = resolveDohList(provider, customDoh);
+  let lastErr = null;
+  for (const doh of list) {
+    for (const v6 of [false, true]) {
+      try {
+        const ips = await dohFetch(doh, domain, v6);
+        if (ips && ips.length) {
+          const ranges = await getCfRanges();
+          const cf = ips.every((ip) => isIpInCf(ip, ranges));
+          return { ips, doh, cf };
+        }
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+  }
+  return { ips: [], doh: list[0] || "", cf: false, error: String(lastErr || "no answer") };
+}
+
+// 解析出前 3 个 IP + CF 判定（供前端 IP 列展示）
+async function resolveIps(domain, provider, customDoh) {
+  const r = await dohResolve(domain, provider, customDoh);
+  return { ips: r.ips.slice(0, 3), doh: r.doh, cf: r.cf, error: r.error || null };
+}
+
+// 测试某 DoH 是否可用（自定义地址确认前调用）
+async function testDoh(doh) {
+  if (!/^https:\/\//i.test(doh)) return { ok: false, msg: "仅支持 https:// 开头的 DoH 地址" };
+  try {
+    const r = await dohResolve("cloudflare.com", "custom", doh);
+    if (r.ips && r.ips.length) return { ok: true, ips: r.ips };
+    return { ok: false, msg: "解析无结果" };
+  } catch (e) {
+    return { ok: false, msg: String(e.message || e) };
+  }
+}
+
+// ====================================================================
 // cf_domains.txt 在 GitHub 仓库的位置（main 分支）
 // 直接走 GitHub 官方 raw 域名，避免第三方代理（dl.lbcn.top 等）失效导致读取不到列表
+// ====================================================================
 const RAW_DOMAINS_URL =
   "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 
 function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", ...headers },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      ...headers,
+    },
   });
 }
 
@@ -34,7 +194,12 @@ export default {
 
     if (path === "/" || path === "/index.html") {
       return new Response(html(), {
-        headers: { "content-type": "text/html; charset=utf-8" },
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          "pragma": "no-cache",
+          "expires": "0",
+        },
       });
     }
 
