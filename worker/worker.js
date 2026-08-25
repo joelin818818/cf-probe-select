@@ -15,46 +15,7 @@
 const RAW_DOMAINS_URL =
   "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 
-// 国家英文名 -> 中文名（ipwho.is 返回英文，做常用映射）
-const COUNTRY_MAP = {
-  "United States": "美国",
-  "Netherlands": "荷兰",
-  "Germany": "德国",
-  "United Kingdom": "英国",
-  "Japan": "日本",
-  "Singapore": "新加坡",
-  "France": "法国",
-  "Canada": "加拿大",
-  "Australia": "澳大利亚",
-  "Hong Kong": "香港",
-  "South Korea": "韩国",
-  "India": "印度",
-  "Brazil": "巴西",
-  "Sweden": "瑞典",
-  "Finland": "芬兰",
-  "Poland": "波兰",
-  "Ireland": "爱尔兰",
-  "Switzerland": "瑞士",
-  "Belgium": "比利时",
-  "Austria": "奥地利",
-  "Norway": "挪威",
-  "Denmark": "丹麦",
-  "Spain": "西班牙",
-  "Italy": "意大利",
-  "Russia": "俄罗斯",
-  "China": "中国",
-  "Taiwan": "台湾",
-  "Turkey": "土耳其",
-  "United Arab Emirates": "阿联酋",
-  "Israel": "以色列",
-  "Mexico": "墨西哥",
-  "South Africa": "南非",
-  "Thailand": "泰国",
-  "Vietnam": "越南",
-  "Malaysia": "马来西亚",
-  "Indonesia": "印尼",
-  "Philippines": "菲律宾",
-};
+// 注：归属地（国家）功能已取消，仅保留 IP 解析与 CF 段判定。
 
 export default {
   async fetch(request, env, ctx) {
@@ -124,11 +85,8 @@ async function resolveIps(domain) {
     const out = [];
     for (const ans of answers) {
       const ip = ans.data;
-      const loc = await fetchIpLocation(ip);
       out.push({
         ip,
-        country: loc.country,
-        countryCode: loc.countryCode,
         isCf: cfRanges ? isIpInRanges(ip, cfRanges) : null, // null = 未能判定
       });
     }
@@ -214,28 +172,6 @@ function isIpInRanges(ip, ranges) {
     if ((num >> shift) === (baseNum >> shift)) return true;
   }
   return false;
-}
-
-async function fetchIpLocation(ip) {
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 3000);
-    const res = await fetch(`https://ipwho.is/${ip}`, {
-      signal: ctrl.signal,
-      cf: { cacheTtl: 86400 },
-    });
-    clearTimeout(t);
-    if (!res.ok) return { country: "-", countryCode: "-" };
-    const data = await res.json();
-    if (!data.success) return { country: "-", countryCode: "-" };
-    const en = data.country || "-";
-    return {
-      country: COUNTRY_MAP[en] || en,
-      countryCode: data.country_code || "-",
-    };
-  } catch (e) {
-    return { country: "-", countryCode: "-" };
-  }
 }
 
 function json(data, status = 200, extraHeaders = {}) {
@@ -340,7 +276,7 @@ function html() {
       <tr>
         <th class="rank">#</th>
         <th data-sort="domain">域名</th>
-        <th data-sort="ip">IP 归属地（前 3 · 含延迟）</th>
+        <th data-sort="ip">IP（前 3 · 含延迟）</th>
         <th data-sort="cf">CF IP</th>
         <th data-sort="lat">延迟 (ms)</th>
         <th data-sort="status">状态</th>
@@ -384,30 +320,6 @@ async function loadDomains() {
   render();
 }
 
-async function resolveAllIps() {
-  const CONC = 5;
-  let done = 0;
-  for (let i = 0; i < domains.length; i += CONC) {
-    const batch = domains.slice(i, i + CONC);
-    await Promise.all(batch.map(async (d) => {
-      stateMap[d].phase = "resolving";
-      try {
-        const r = await fetch("/api/resolve?domain=" + encodeURIComponent(d));
-        const data = await r.json();
-        ipMap[d] = data.ips || [];
-      } catch (e) {
-        ipMap[d] = [];
-      }
-      stateMap[d].phase = "resolved"; // 解析完成，等待测速
-      done++;
-      info.textContent = "IP 解析中… " + done + " / " + domains.length;
-      // 解析阶段也按节奏刷新（每 RENDER_EVERY 个）让 IP/归属地实时出现
-      if (done % RENDER_EVERY === 0) render();
-    }));
-  }
-  render(); // 解析收尾，确保全部行已显示
-}
-
 function ipHtml(domain) {
   const list = ipMap[domain];
   if (!list) return '<span class="badge">—</span>';
@@ -415,7 +327,7 @@ function ipHtml(domain) {
   return '<div class="ip-list">' + list.map(x => {
     const lat = (x.lat !== undefined && x.lat !== null)
       ? \`<span class="ip-lat">\${x.lat}ms</span>\` : "";
-    return \`<div class="ip-item"><span>\${x.ip}</span><span class="cc">\${x.country}</span>\${lat}</div>\`;
+    return \`<div class="ip-item"><span>\${x.ip}</span>\${lat}</div>\`;
   }).join("") + '</div>';
 }
 
@@ -567,25 +479,40 @@ async function startTest() {
   document.getElementById("start").disabled = true;
   // 重置状态
   domains.forEach((d) => {
-    stateMap[d] = { phase: ipMap[d] ? "resolved" : "idle", lat: null, status: null };
+    stateMap[d] = { phase: "idle", lat: null, status: null };
   });
-  info.textContent = "IP 解析中… 0 / " + domains.length;
-  await resolveAllIps();
+
+  // 单域名任务：先解析 IP，解析完立即测速（解析与测速重叠，不必等全部解析完）
+  async function resolveAndMeasure(d) {
+    stateMap[d].phase = "resolving";
+    try {
+      const r = await fetch("/api/resolve?domain=" + encodeURIComponent(d));
+      const data = await r.json();
+      ipMap[d] = data.ips || [];
+    } catch (e) {
+      ipMap[d] = [];
+    }
+    stateMap[d].phase = "resolved";
+    await measure(d); // 内部会把 phase 置为 measuring -> done
+  }
+
   let done = 0;
   let lastRender = 0;
-  info.textContent = "测速中… 0 / " + domains.length;
-  // 并发 8 个，逐批测速，每个 IP 各测 3 轮取平均
+  info.textContent = "解析并测速中… 0 / " + domains.length;
+  // 并发 8 个，解析完一个立刻测速下一个域名继续解析，整体重叠推进
   const CONC = 8;
   for (let i = 0; i < domains.length; i += CONC) {
     const batch = domains.slice(i, i + CONC);
-    await Promise.all(batch.map(measure));
-    done += batch.length;
-    info.textContent = "测速中… " + done + " / " + domains.length;
-    // 每完成 RENDER_EVERY 个就动态刷新列表（含实时重排），最后一批必刷
-    if (done >= lastRender + RENDER_EVERY || done === domains.length) {
-      render();
-      lastRender = done;
-    }
+    await Promise.all(batch.map(async (d) => {
+      await resolveAndMeasure(d);
+      done++;
+      info.textContent = "解析并测速中… " + done + " / " + domains.length;
+      // 每完成 RENDER_EVERY 个就动态刷新列表（含实时重排），最后一批必刷
+      if (done >= lastRender + RENDER_EVERY || done === domains.length) {
+        render();
+        lastRender = done;
+      }
+    }));
   }
   testing = false;
   document.getElementById("start").disabled = false;
