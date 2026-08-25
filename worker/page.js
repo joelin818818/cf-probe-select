@@ -1,5 +1,5 @@
 // 前端页面模块：返回完整的 HTML 页面字符串（含内联前端脚本）
-import { DNS_PROVIDERS } from "./dns-providers.js";
+import { DNS_PROVIDERS, DNS_PROVIDER_LIST } from "./dns-providers.js";
 
 // 生成 DNS 服务商下拉选项（按数组顺序）
 function providerOptions() {
