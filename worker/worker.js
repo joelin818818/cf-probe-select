@@ -505,7 +505,7 @@ async function measureOne(target) {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT);
-    await fetch("http://" + target, {
+    await fetch("https://" + target, {
       method: "HEAD",
       mode: "no-cors",
       cache: "no-store",
