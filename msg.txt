@@ -1,7 +1,0 @@
-refactor: Worker 拆分为 ES Module 并增强前端控件
-
-- 拆分单文件 worker.js 为 worker.js（入口）/ dns-providers.js / resolve.js / page.js
-- 前端新增 DNS 服务商下拉（本地/阿里/腾讯/360/Google/Cloudflare/OpenDNS/自定义）
-- 自定义 DoH 需经 /api/test-doh 测试通过方可使用，仅支持 https DoH（不支持裸 UDP 53）
-- 新增解析线程数、测速线程数控件（localStorage 持久化）
-- 测速改为先全量解析再统一测速，进度分别显示「解析 X/N · 测速 Y/N」
