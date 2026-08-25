@@ -86,6 +86,33 @@ CF_IP_RANGES_FALLBACK = [
 ]
 
 
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+# 全局 Session，复用 TCP/TLS 连接，减少探测与扩散时的握手开销
+HTTP_SESSION = requests.Session()
+HTTP_SESSION.headers.update(HEADERS)
+
+# 探测阶段 DNS 解析缓存：domain -> [ips]，供落盘前快速预判，避免重复解析
+DOMAIN_IP_CACHE = {}
+
+
 def load_cf_ip_ranges(timeout: int = 10):
     """从 Cloudflare 官网拉取最新 IPv4 CIDR 段，失败则返回兜底列表。"""
     url = "https://www.cloudflare.com/ips-v4"
@@ -167,32 +194,6 @@ BIG_TECH_ROOTS = {
     "ibm.com", "adobe.com", "akamai.com", "akamaized.net", "fastly.net",
     "cloudfront.cn",
 }
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
-    ),
-    "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-}
-
-# 全局 Session，复用 TCP/TLS 连接，减少探测与扩散时的握手开销
-HTTP_SESSION = requests.Session()
-HTTP_SESSION.headers.update(HEADERS)
-
-# 探测阶段 DNS 解析缓存：domain -> [ips]，供落盘前快速预判，避免重复解析
-DOMAIN_IP_CACHE = {}
 
 OUTPUT_FILE = "cf_domains.txt"
 BOOTSTRAP_SEEDS = ["cloudflare.com"]
@@ -602,13 +603,16 @@ def run_cf_explorer():
         else:
             normal_q.append(domain)
 
-    for s in seeds:
-        enqueue(s)
-
-    visited = set()
+    visited = set()      # 已进入队列的域名（_expand 入队去重用）
+    processed = set()    # 已出队处理过的域名（next_batch 去重用，与 visited 区分）
     non_cf_roots = set()
     new_added = 0
-    state_lock = threading.Lock()  # 保护 saved/root_sub_count/non_cf_roots/new_added/visited
+    state_lock = threading.Lock()  # 保护 saved/root_sub_count/non_cf_roots/new_added/visited/processed
+
+    for s in seeds:
+        with state_lock:
+            visited.add(s)
+        enqueue(s)
 
     print(f"[*] 结果保存路径: {os.path.abspath(OUTPUT_FILE)}\n" + "=" * 60)
 
@@ -621,9 +625,11 @@ def run_cf_explorer():
                 d = normal_q.popleft()
             d = d.strip().lower()
             with state_lock:
-                if d in visited:
+                # 用 processed 判断"是否已处理"，不要用 visited，否则 _expand 入队时
+                # 已 mark 的域名会被误判为已处理而永远跳过（这是之前"嗅探后无动作"的根因）
+                if d in processed:
                     continue
-                visited.add(d)
+                processed.add(d)
             batch.append(d)
         return batch
 
