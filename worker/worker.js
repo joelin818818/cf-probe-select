@@ -353,11 +353,13 @@ function html() {
 </div>
 
 <script>
-const TIMEOUT = 8000; // 单域名测速超时
+const TIMEOUT = 8000;       // 单域名测速超时
+const RENDER_EVERY = 10;    // 每完成 10 个域名刷新一次列表（动态更新 + 重排）
 let domains = [];
-let results = []; // {domain, lat, status}
-let ipMap = {};   // domain -> [{ip, country, countryCode}]
+let ipMap = {};             // domain -> [{ip, country, countryCode, lat}]
+let stateMap = {};          // domain -> { phase, lat, status }
 let testing = false;
+let orderIndex = {};        // domain -> 原始序号，用于稳定排序兜底
 
 const tbody = document.getElementById("tbody");
 const info = document.getElementById("info");
@@ -367,8 +369,14 @@ async function loadDomains() {
   const data = await r.json();
   domains = data.domains || [];
   // 重置上一轮结果，确保刷新后是全新数据
-  results = [];
   ipMap = {};
+  stateMap = {};
+  orderIndex = {};
+  domains.forEach((d, i) => {
+    ipMap[d] = undefined;      // 未解析
+    stateMap[d] = { phase: "idle", lat: null, status: null };
+    orderIndex[d] = i;
+  });
   testing = false;
   document.getElementById("start").disabled = false;
   document.getElementById("src").textContent =
@@ -382,6 +390,7 @@ async function resolveAllIps() {
   for (let i = 0; i < domains.length; i += CONC) {
     const batch = domains.slice(i, i + CONC);
     await Promise.all(batch.map(async (d) => {
+      stateMap[d].phase = "resolving";
       try {
         const r = await fetch("/api/resolve?domain=" + encodeURIComponent(d));
         const data = await r.json();
@@ -389,11 +398,14 @@ async function resolveAllIps() {
       } catch (e) {
         ipMap[d] = [];
       }
+      stateMap[d].phase = "resolved"; // 解析完成，等待测速
       done++;
       info.textContent = "IP 解析中… " + done + " / " + domains.length;
-      render();
+      // 解析阶段也按节奏刷新（每 RENDER_EVERY 个）让 IP/归属地实时出现
+      if (done % RENDER_EVERY === 0) render();
     }));
   }
+  render(); // 解析收尾，确保全部行已显示
 }
 
 function ipHtml(domain) {
@@ -427,53 +439,65 @@ function cfHtml(domain) {
 }
 
 function render() {
-  if (!results.length && !testing) {
-    if (!domains.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无域名数据</td></tr>';
-      return;
-    }
-    tbody.innerHTML = domains
-      .map((d, i) => \`<tr class="row \${isSuspicious(d) ? "warn-row" : ""}" data-d="\${d}"><td class="rank">\${i + 1}</td>
-        <td>\${d}\${isSuspicious(d) ? ' <span class="flag-warn">疑似伪CF</span>' : ""}</td>
-        <td>\${ipHtml(d)}</td><td>\${cfHtml(d)}</td><td class="lat">—</td><td><span class="badge">未测</span></td></tr>\`)
-      .join("");
+  if (!domains.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无域名数据</td></tr>';
     return;
   }
-  const sorted = [...results].sort((a, b) => sortFn(a, b));
+  // 始终基于 domains，按当前 stateMap 实时排序（测速过程中自动重排）
+  const sorted = [...domains].sort(sortFn);
   tbody.innerHTML = sorted
-    .map((r, i) => {
-      let cls = "lat", txt = "—", st = "";
-      if (r.status === "ok") { cls += " ok"; txt = r.lat + ""; st = '<span class="badge ok">可达</span>'; }
-      else if (r.status === "timeout") { cls += " timeout"; txt = "> " + TIMEOUT; st = '<span class="badge">超时</span>'; }
-      else { cls += " err"; txt = "✕"; st = '<span class="badge">失败</span>'; }
-      const best = i === 0 && r.status === "ok" ? "best" : "";
-      const warn = isSuspicious(r.domain) ? "warn-row" : "";
-      return \`<tr class="row \${best} \${warn}" data-d="\${r.domain}"><td class="rank">\${i + 1}</td>
-        <td>\${r.domain}\${isSuspicious(r.domain) ? ' <span class="flag-warn">疑似伪CF</span>' : ""}</td>
-        <td>\${ipHtml(r.domain)}</td><td>\${cfHtml(r.domain)}</td><td class="\${cls}">\${txt}</td><td>\${st}</td></tr>\`;
+    .map((d, i) => {
+      const st = stateMap[d] || { phase: "idle", lat: null, status: null };
+      let cls = "lat", txt = "—", badge = "";
+      if (st.phase === "resolving") {
+        badge = '<span class="badge">解析中</span>';
+      } else if (st.phase === "resolved") {
+        badge = '<span class="badge">待测</span>';
+      } else if (st.phase === "measuring") {
+        badge = '<span class="badge">测速中</span>';
+      } else if (st.status === "ok") {
+        cls += " ok"; txt = st.lat + ""; badge = '<span class="badge ok">可达</span>';
+      } else if (st.status === "timeout") {
+        cls += " timeout"; txt = "> " + TIMEOUT; badge = '<span class="badge">超时</span>';
+      } else if (st.status === "err") {
+        cls += " err"; txt = "✕"; badge = '<span class="badge">失败</span>';
+      } else {
+        badge = '<span class="badge">待测</span>';
+      }
+      const best = i === 0 && st.status === "ok" ? "best" : "";
+      const warn = isSuspicious(d) ? "warn-row" : "";
+      return \`<tr class="row \${best} \${warn}" data-d="\${d}"><td class="rank">\${i + 1}</td>
+        <td>\${d}\${isSuspicious(d) ? ' <span class="flag-warn">疑似伪CF</span>' : ""}</td>
+        <td>\${ipHtml(d)}</td><td>\${cfHtml(d)}</td><td class="\${cls}">\${txt}</td><td>\${badge}</td></tr>\`;
     })
     .join("");
 }
 
 let sortMode = "lat";
 function sortFn(a, b) {
-  if (sortMode === "domain") return a.domain.localeCompare(b.domain);
-  if (sortMode === "status") return a.status.localeCompare(b.status);
+  const sa = stateMap[a] || {}, sb = stateMap[b] || {};
+  // 未出结果（解析中/待测/测速中）统一沉底，按原始序号稳定排列
+  const aDone = sa.status != null, bDone = sb.status != null;
+  if (aDone !== bDone) return aDone ? -1 : 1;
+  if (!aDone && !bDone) return orderIndex[a] - orderIndex[b];
+
+  if (sortMode === "domain") return a.localeCompare(b);
+  if (sortMode === "status") return (sa.status || "").localeCompare(sb.status || "");
   if (sortMode === "ip") {
-    const ca = ipMap[a.domain]?.[0]?.country || "zzz";
-    const cb = ipMap[b.domain]?.[0]?.country || "zzz";
+    const ca = ipMap[a]?.[0]?.country || "zzz";
+    const cb = ipMap[b]?.[0]?.country || "zzz";
     return ca.localeCompare(cb);
   }
   if (sortMode === "cf") {
     // CF 优先：全 CF -> 0，疑似非 CF -> 1，未判定 -> 2
     const rank = (d) => (isSuspicious(d) ? 1 : (ipMap[d]?.every(x => x.isCf === true) ? 0 : 2));
-    return rank(a.domain) - rank(b.domain);
+    return rank(a) - rank(b);
   }
   // 延迟升序：ok 优先，其次 timeout，最后 err；同状态按数值
   const rank = (s) => (s === "ok" ? 0 : s === "timeout" ? 1 : 2);
-  if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
-  if (a.status === "ok" && b.status === "ok") return a.lat - b.lat;
-  return 0;
+  if (rank(sa.status) !== rank(sb.status)) return rank(sa.status) - rank(sb.status);
+  if (sa.status === "ok" && sb.status === "ok") return sa.lat - sb.lat;
+  return orderIndex[a] - orderIndex[b];
 }
 
 async function measureOne(target) {
@@ -497,9 +521,11 @@ async function measureOne(target) {
 
 // 方案 B：对每个解析出的 IP 各自测 3 轮取平均，域名延迟 = 各 IP 延迟的平均
 async function measure(domain) {
+  stateMap[domain].phase = "measuring";
   const list = ipMap[domain] || [];
-  if (!list.length) {
-    return { domain, lat: null, status: "err" };
+  if (!list || !list.length) {
+    stateMap[domain] = { phase: "done", lat: null, status: "err" };
+    return;
   }
   const ROUNDS = 3;
   let allTimes = [];
@@ -521,47 +547,56 @@ async function measure(domain) {
       allTimes.push(item.lat);
     } else {
       item.lat = null;
-      if (hadErr) { /* 计入错误 */ }
     }
   }
 
   if (allTimes.length > 0) {
     const avg = Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length);
-    return { domain, lat: avg, status: "ok" };
+    stateMap[domain] = { phase: "done", lat: avg, status: "ok" };
+  } else if (hadTimeout) {
+    stateMap[domain] = { phase: "done", lat: TIMEOUT, status: "timeout" };
+  } else {
+    stateMap[domain] = { phase: "done", lat: null, status: "err" };
   }
-  if (hadTimeout) {
-    return { domain, lat: TIMEOUT, status: "timeout" };
-  }
-  return { domain, lat: null, status: "err" };
 }
 
 async function startTest() {
   if (testing || !domains.length) return;
   testing = true;
+  sortMode = "lat"; // 测速过程始终按延迟实时重排
   document.getElementById("start").disabled = true;
-  results = [];
+  // 重置状态
+  domains.forEach((d) => {
+    stateMap[d] = { phase: ipMap[d] ? "resolved" : "idle", lat: null, status: null };
+  });
   info.textContent = "IP 解析中… 0 / " + domains.length;
   await resolveAllIps();
   let done = 0;
+  let lastRender = 0;
   info.textContent = "测速中… 0 / " + domains.length;
   // 并发 8 个，逐批测速，每个 IP 各测 3 轮取平均
   const CONC = 8;
   for (let i = 0; i < domains.length; i += CONC) {
     const batch = domains.slice(i, i + CONC);
-    const batchRes = await Promise.all(batch.map(measure));
-    results.push(...batchRes);
-    done += batchRes.length;
+    await Promise.all(batch.map(measure));
+    done += batch.length;
     info.textContent = "测速中… " + done + " / " + domains.length;
-    render();
+    // 每完成 RENDER_EVERY 个就动态刷新列表（含实时重排），最后一批必刷
+    if (done >= lastRender + RENDER_EVERY || done === domains.length) {
+      render();
+      lastRender = done;
+    }
   }
   testing = false;
   document.getElementById("start").disabled = false;
   sortMode = "lat";
-  const sorted = [...results].sort((a, b) => sortFn(a, b));
-  const fastest = sorted.find(r => r.status === "ok");
-  info.textContent = "完成 · 共 " + results.length + " 个 · 最快 " +
-    (fastest ? fastest.domain + " " + fastest.lat + "ms" : "无");
   render();
+  const fastest = [...domains]
+    .map((d) => stateMap[d])
+    .filter((s) => s && s.status === "ok")
+    .sort((a, b) => a.lat - b.lat)[0];
+  info.textContent = "完成 · 共 " + domains.length + " 个 · 最快 " +
+    (fastest ? "见列表顶部" : "无");
 }
 
 function copyText(t) {
@@ -586,9 +621,8 @@ document.getElementById("sort").addEventListener("click", () => {
   sortMode = "lat"; render();
 });
 document.getElementById("copyAll").addEventListener("click", () => {
-  const sorted = [...(results.length ? results : domains.map(d => ({domain:d})))]
-    .sort((a,b)=>sortFn(a,b));
-  copyText(sorted.map(r=>r.domain).join("\\n"));
+  const sorted = [...domains].sort((a, b) => sortFn(a, b));
+  copyText(sorted.join("\\n"));
   info.textContent = "已复制 " + sorted.length + " 个域名到剪贴板";
 });
 document.querySelectorAll("th[data-sort]").forEach(th => {
