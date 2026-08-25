@@ -20,7 +20,7 @@ import { html } from "./page.js";
 
 // 固定版本号（部署版本）：格式 YYMMDDHHmm（如 2608252254）
 // 每次更新代码、提交前必须手动更新此值，代表本次部署的版本。
-const VERSION = "2608252300";
+const VERSION = "2608252305";
 
 // ====================================================================
 // DNS 服务商映射表（全仓库唯一来源，page.js 从此处导入）
@@ -201,6 +201,8 @@ export default {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          "cdn-cache-control": "no-store",
+          "surrogate-control": "no-store",
           "pragma": "no-cache",
           "expires": "0",
         },

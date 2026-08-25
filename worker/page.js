@@ -483,13 +483,27 @@ document.querySelectorAll("th[data-sort]").forEach((th) => {
 // 全局错误兜底：任何未捕获异常都写到表格里，方便用户截图反馈
 window.addEventListener("error", (e) => {
   console.error(e);
-  const msg = "JS 运行时错误：" + (e.message || e.error || "未知");
+  const stack = e.error && e.error.stack ? e.error.stack : "";
+  const details = [
+    "msg=" + (e.message || e.error || "未知"),
+    "file=" + (e.filename || ""),
+    "line=" + (e.lineno || ""),
+    "col=" + (e.colno || ""),
+    stack ? "stack=" + stack.slice(0, 300) : "",
+  ].filter(Boolean).join(" / ");
+  const msg = "JS 运行时错误：" + details;
   setInfo(msg);
   if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="6" class="empty err">' + msg + "</td></tr>";
 });
 window.addEventListener("unhandledrejection", (e) => {
   console.error(e);
-  const msg = "未处理的 Promise 错误：" + (e.reason && e.reason.message ? e.reason.message : String(e.reason));
+  const reason = e.reason;
+  const stack = reason && reason.stack ? reason.stack : "";
+  const details = [
+    "msg=" + (reason && reason.message ? reason.message : String(reason)),
+    stack ? "stack=" + stack.slice(0, 300) : "",
+  ].filter(Boolean).join(" / ");
+  const msg = "未处理的 Promise 错误：" + details;
   setInfo(msg);
   if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="6" class="empty err">' + msg + "</td></tr>";
 });
@@ -505,12 +519,14 @@ export function html(version) {
   DNS_PROVIDER_LIST.forEach((p) => {
     if (p.doh) dohUrls[p.key] = p.doh;
   });
-  const frontendJs = "const DOh_URLS = " + JSON.stringify(dohUrls) + ";\n" + FRONTEND_JS;
+  const frontendJs = "/* FRONTEND_VERSION=" + (version || "") + " */\nconst DOh_URLS = " + JSON.stringify(dohUrls) + ";\n" + FRONTEND_JS;
   return `<!doctype html>
+<!-- DEPLOY_VERSION=${version || ""} -->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="deploy-version" content="${version || ""}">
 <title>CF 探测优选 v${version || ""}</title>
 <style>
   :root {
