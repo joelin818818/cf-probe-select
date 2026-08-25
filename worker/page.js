@@ -12,6 +12,7 @@ function providerOptions() {
 const FRONTEND_JS = `
 const TIMEOUT = 4000;       // 单域名测速超时
 const RENDER_EVERY = 5;     // 每完成 5 个刷新一次列表
+const MAX_IPS = 8;          // 单域名最多展示的解析 IP 数（展示全部解析结果，封顶防超长）
 let domains = [];
 let ipMap = {};             // domain -> [{ip, isCf}]
 let stateMap = {};          // domain -> {phase,lat,status,rounds,okRounds,avg}
@@ -140,7 +141,7 @@ async function resolveOne(d) {
   if (provider === "local") {
     const res = await fetch("/api/resolve?domain=" + encodeURIComponent(d) + "&provider=local", { cache: "no-store" });
     const data = await res.json();
-    const list = (data.ips || []).slice(0, 3).map((ip) => ({ ip, isCf: !!data.cf }));
+    const list = (data.ips || []).slice(0, MAX_IPS).map((ip) => ({ ip, isCf: !!data.cf }));
     ipMap[d] = list.length ? list : [];
     return list;
   }
@@ -154,7 +155,7 @@ async function resolveOne(d) {
     ips = [];
   }
   // CF 判定交服务端（仅持有 CF 网段），浏览器不解析 DNS 判定
-  const list = await markCf(ips.slice(0, 3));
+  const list = await markCf(ips.slice(0, MAX_IPS));
   ipMap[d] = list;
   return list;
 }
@@ -197,18 +198,39 @@ async function runPool(tasks, size) {
   await Promise.all(ws);
 }
 
+// 开始测速前的统一预检：对所有 DNS 服务商（含公开 DoH 与自定义）做一次连通性校验，
+// 不可用时中止并提示，避免静默产出空 IP。local 由服务端解析，无需浏览器预检。
+async function preflightCheck() {
+  const provider = loadProvider();
+  const customDoh = loadCustomDoh().trim();
+  if (provider === "local") return true;
+
+  let doh = getDohUrl(provider, customDoh);
+  if (provider === "custom") {
+    if (!customDoh) { alert("请先填写自定义 DoH 地址"); return false; }
+    if (customDoh.indexOf("https://") !== 0) { alert("自定义 DoH 必须是 https:// 开头（不支持裸 UDP 53；https 页面下也不支持 http 内网明文，请用自签 https）"); return false; }
+  }
+  if (!doh) { alert("未知 DNS 服务商"); return false; }
+
+  try {
+    const ips = await browserDohResolve(doh, "cloudflare.com");
+    if (!ips.length) {
+      alert("该 DoH 无法解析出 IP（可能地址不正确、网络被拦截，或浏览器 CORS 限制）：\n" + doh + "\n请更换其他 DNS 服务商或检查网络");
+      return false;
+    }
+    return true;
+  } catch (e) {
+    let extra = "";
+    if (provider === "custom") extra = "\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + doh + " 并点「继续」）";
+    alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\n" + doh + "\n错误：" + e.message + extra + "\n请更换其他 DNS 服务商");
+    return false;
+  }
+}
+
 async function startTest() {
   if (testing) return;
-  // 自定义 DoH 未通过浏览器测试则拦截
-  const provider = loadProvider();
-  if (provider === "custom") {
-    const customDoh = loadCustomDoh();
-    if (!customDoh) { alert("请先填写并测试 DoH 地址"); return; }
-    if (localStorage.getItem("cf_custom_ok") !== "1") {
-      alert("DoH 尚未测试通过，请先点击「测试」确认可用");
-      return;
-    }
-  }
+  // 开始前统一预检所选 DoH 是否可用（所有服务商，含公开与自定义）
+  if (!(await preflightCheck())) return;
   if (!domains.length) await loadDomains();
   testing = true;
   stopRequested = false;
@@ -417,69 +439,18 @@ function updateCustomUI() {
   $("customDohWrap").style.display = isCustom ? "inline-flex" : "none";
   $("customDoh").disabled = !isCustom;
   $("customDoh").placeholder = "https://你的 DoH 地址（公开或内网自签）";
-  if (!isCustom) {
-    localStorage.removeItem("cf_custom_ok");
-  }
-  // 自定义未通过测试时，禁用开始测速按钮
-  if (isCustom) {
-    const url = $("customDoh").value.trim();
-    const ok = url && localStorage.getItem("cf_custom_ok") === "1";
-    $("start").disabled = !ok;
-  } else {
-    $("start").disabled = false;
-  }
+  // 开始测速前的 DoH 可用性校验已统一在 preflightCheck 中完成，此处无需再控制 start 按钮
 }
-async function testCustomDoh() {
-  const url = $("customDoh").value.trim();
-  if (!url) { alert("请先填写 DoH 地址"); return; }
-  if (url.indexOf("https://") !== 0) {
-    alert("自定义 DoH 必须是 https:// 开头（不支持裸 UDP 53；https 页面下也不支持 http 内网明文，请用自签 https）");
-    return;
-  }
-  $("testDoh").disabled = true;
-  $("testDoh").textContent = "测试中…";
-  $("start").disabled = true;
-  try {
-    // 浏览器客户端直连测试（自签/内网地址由浏览器发起，可手动信任证书）
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(url + "?name=cloudflare.com&type=1", {
-      headers: { accept: "application/dns-json" },
-      signal: ctrl.signal,
-    });
-    clearTimeout(to);
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const j = await r.json();
-    const ok = (j.Answer || []).some((a) => a.type === 1 && typeof a.data === "string");
-    if (ok) {
-      localStorage.setItem("cf_custom_ok", "1");
-      saveCustomDoh(url);
-      $("testDoh").textContent = "测试通过 ✓";
-      $("start").disabled = false;
-    } else {
-      localStorage.removeItem("cf_custom_ok");
-      $("testDoh").textContent = "测试失败";
-      $("start").disabled = true;
-      alert("测试失败：解析无结果");
-    }
-  } catch (e) {
-    localStorage.removeItem("cf_custom_ok");
-    $("testDoh").textContent = "测试失败";
-    $("start").disabled = true;
-    alert("测试异常：" + e.message + "\n（若使用自签/内网证书，请先在浏览器手动信任该地址：直接打开 " + url + " 并点「继续」）");
-  }
-  setTimeout(() => { $("testDoh").textContent = "测试连接"; $("testDoh").disabled = false; }, 1500);
-}
+// 预检已统一在 startTest -> preflightCheck 中完成，自定义不再单独测试按钮（见 preflightCheck）
 
 $("start").addEventListener("click", startTest);
 $("stop").addEventListener("click", stopTest);
 $("refresh").addEventListener("click", async () => { await loadDomains(); setInfo("已刷新域名列表"); });
 $("copyAll").addEventListener("click", copyAll);
 $("provider").addEventListener("change", (e) => { saveProvider(e.target.value); updateCustomUI(); });
-$("customDoh").addEventListener("input", (e) => { saveCustomDoh(e.target.value); localStorage.removeItem("cf_custom_ok"); updateCustomUI(); });
+$("customDoh").addEventListener("input", (e) => { saveCustomDoh(e.target.value); updateCustomUI(); });
 $("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parseInt(e.target.value, 10) || 16); });
 $("measureThreads").addEventListener("change", (e) => { saveMeasureThreads(parseInt(e.target.value, 10) || 10); });
-$("testDoh").addEventListener("click", testCustomDoh);
 document.querySelectorAll("th[data-sort]").forEach((th) => {
   th.addEventListener("click", () => { sortMode = th.getAttribute("data-sort"); render(); });
 });
@@ -569,8 +540,7 @@ export function html() {
     <select id="provider">${options}</select>
   </label>
   <label id="customDohWrap">自定义 DoH
-    <input id="customDoh" type="text" placeholder="https://..." size="28">
-    <button id="testDoh" class="ghost">测试连接</button>
+    <input id="customDoh" type="text" placeholder="https://你的 DoH 地址（公开或内网自签）" size="28">
   </label>
   <label>解析线程
     <input id="resolveThreads" type="number" min="1" max="32" value="16">
