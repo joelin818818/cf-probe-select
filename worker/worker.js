@@ -35,7 +35,7 @@ function bjVersion() {
 //   原因：Cloudflare Worker 的 fetch 只能访问公网且必须受信 CA 证书，无法连内网 / 自签
 //   DoH；而浏览器可手动信任自签证书、可访问同局域网地址。
 // - "local" 由 Worker 自己发起解析（服务端视角），代表「服务端 -> 域名」的解析结果。
-// - 公开 DoH（aliyun/tencent/...）的 doh 字段供浏览器侧直接使用。
+// - 公开 DoH（aliyun/dnssb/google/adguard/quad9）的 doh 字段供浏览器侧直接使用。
 // - "custom" = 用户填写的 DoH 地址，浏览器直连；支持公开 https DoH，也支持内网自签
 //   https DoH（自签证书需先在浏览器手动信任该地址）。无需区分"公开/内网自签"两个选项，
 //   二者代码路径完全一致，仅证书信任方式不同。
@@ -43,15 +43,16 @@ function bjVersion() {
 // 用数组固定下拉顺序（对象在含数字键 "360" 时枚举顺序会乱）
 export const DNS_PROVIDER_LIST = [
   { key: "local", label: "本地（服务端 DNS）", doh: "", note: "服务端运行环境默认递归解析" },
-  // 注意：以下公开 DoH 均使用各服务商的 JSON API 端点（application/dns-json）。
-  // 阿里/360/Google 的 JSON 端点为 /resolve；腾讯/Cloudflare 为 /dns-query。
-  // OpenDNS 在中国网络/浏览器环境下常因 CORS 或网络拦截不可用，仍保留选项但建议优先用其他服务商。
-  { key: "aliyun", label: "阿里 DoH", doh: "https://dns.alidns.com/resolve" },
-  { key: "tencent", label: "腾讯 DoH", doh: "https://doh.pub/dns-query" },
-  { key: "qihoo360", label: "360 DoH", doh: "https://doh.360.cn/resolve" },
-  { key: "google", label: "Google DoH", doh: "https://dns.google/resolve" },
-  { key: "cloudflare", label: "Cloudflare DoH", doh: "https://1.1.1.1/dns-query" },
-  { key: "opendns", label: "OpenDNS DoH", doh: "https://doh.opendns.com/dns-query" },
+  // 仅保留浏览器直连可用（服务端返回 CORS 头）的公开 DoH。
+  // 验证结论（2026-08-26）：腾讯/360 等国内 DoH 不返回 Access-Control-Allow-Origin 头，
+  // 浏览器直连必被 CORS 拦截（与 URL 路径无关），已移除；Cloudflare 1.1.1.1 / OpenDNS
+  // 在国内网络不可达，已移除并改用国际备选。阿里经实测返回 CORS:*；AdGuard/Quad9/DNS.SB
+  // 为业界公认支持 CORS 的 DoH。
+  { key: "aliyun", label: "阿里 DoH（国内）", doh: "https://dns.alidns.com/resolve" },
+  { key: "dnssb", label: "DNS.SB DoH（香港）", doh: "https://doh.dns.sb/dns-query" },
+  { key: "google", label: "Google DoH（国际）", doh: "https://dns.google/resolve" },
+  { key: "adguard", label: "AdGuard DoH（国际）", doh: "https://dns.adguard-dns.com/dns-query" },
+  { key: "quad9", label: "Quad9 DoH（国际）", doh: "https://dns.quad9.net/dns-query" },
   { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },
 ];
 
@@ -59,9 +60,7 @@ export const DNS_PROVIDERS = Object.fromEntries(
   DNS_PROVIDER_LIST.map((p) => [p.key, p])
 );
 
-// 兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key
 export function normalizeProviderKey(key) {
-  if (key === "360") return "qihoo360";
   return DNS_PROVIDERS[key] ? key : "local";
 }
 

@@ -30,8 +30,7 @@ const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "
 // 浏览器端本地函数：兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key
 // （注意：本脚本是浏览器内联脚本，无 import，故在此自包含定义）
 function normalizeProviderKey(key) {
-  if (key === "360") return "qihoo360";
-  const valid = ["local","aliyun","tencent","qihoo360","google","cloudflare","opendns","custom"];
+  const valid = ["local","aliyun","dnssb","google","adguard","quad9","custom"];
   return valid.indexOf(key) >= 0 ? key : "local";
 }
 function loadProvider() {
@@ -248,7 +247,7 @@ async function preflightCheck() {
     if (provider === "custom") {
       extra = "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + doh + " 并点「继续」）";
     } else {
-      extra = "\\n提示：部分公开 DoH（如 OpenDNS、Google、阿里等）在特定网络或浏览器环境下可能因 CORS/网络拦截不可用，可尝试「腾讯 DoH」「Cloudflare DoH」「本地」或使用自定义 DoH。";
+      extra = "\\n提示：该公开 DoH 可能不返回 CORS 头（浏览器直连会被拦截）或当前网络不可达。可尝试「阿里 DoH（国内）」「本地」或自定义 DoH；国际 DoH 需可访问境外网络。";
     }
     alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\\n" + doh + "\\n错误：" + e.message + extra);
     return false;
