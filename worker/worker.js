@@ -18,9 +18,14 @@
 
 import { html } from "./page.js";
 
-// 固定版本号（部署版本）：格式 YYMMDDHHmm（如 2608252254）
-// 每次更新代码、提交前必须手动更新此值，代表本次部署的版本。
-const VERSION = "2608252305";
+// 部署版本号（格式 YYMMDDHHmm，如 2608252305），按北京时间（UTC+8）动态生成，
+// 每次请求自动计算，无需手动维护。
+function bjVersion() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  const p2 = (n) => String(n).padStart(2, "0");
+  return p2(d.getUTCFullYear() % 100) + p2(d.getUTCMonth() + 1) + p2(d.getUTCDate()) +
+    p2(d.getUTCHours()) + p2(d.getUTCMinutes());
+}
 
 // ====================================================================
 // DNS 服务商映射表（全仓库唯一来源，page.js 从此处导入）
@@ -197,7 +202,7 @@ export default {
     const path = url.pathname;
 
     if (path === "/" || path === "/index.html") {
-      return new Response(html(VERSION), {
+      return new Response(html(bjVersion()), {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
@@ -210,7 +215,7 @@ export default {
     }
 
     if (path === "/api/health") {
-      return json({ ok: true });
+      return json({ ok: true, version: bjVersion() });
     }
 
     if (path === "/api/domains") {

@@ -13,7 +13,7 @@ function providerOptions() {
 const FRONTEND_JS = `
 const TIMEOUT = 4000;       // 单域名测速超时
 const RENDER_EVERY = 5;     // 每完成 5 个刷新一次列表
-const MAX_IPS = 8;          // 单域名最多展示的解析 IP 数（展示全部解析结果，封顶防超长）
+const MAX_IPS = 3;          // 单域名最多展示的解析 IP 数（展示全部解析结果，封顶 3 个）
 let domains = [];
 let ipMap = {};             // domain -> [{ip, isCf}]
 let stateMap = {};          // domain -> {phase,lat,status,rounds,okRounds,avg}
@@ -101,26 +101,34 @@ async function loadDomains(attempt = 1) {
   }
 }
 
-// 浏览器端直连 DoH 解析（DNS-JSON 协议）
-async function browserDohResolve(doh, domain) {
+// 浏览器端直连 DoH 解析（DNS-JSON 协议）。
+// 查 1 次即可；仅当请求失败（网络/CORS/超时）才重试，最多 3 次；
+// 成功但返回空结果（DoH 确实无 A 记录）不重试。返回该次全部 A 记录 IP。
+async function browserDohResolve(doh, domain, maxAttempts = 3) {
   if (!doh) return [];
-  const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 8000);
-  try {
-    const r = await fetch(doh + "?name=" + encodeURIComponent(domain) + "&type=1", {
-      headers: { accept: "application/dns-json" },
-      signal: ctrl.signal,
-    });
-    clearTimeout(to);
-    if (!r.ok) throw new Error("DoH " + r.status);
-    const j = await r.json();
-    return (j.Answer || [])
-      .filter((a) => a.type === 1 && typeof a.data === "string")
-      .map((a) => a.data);
-  } catch (e) {
-    clearTimeout(to);
-    throw e;
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const r = await fetch(doh + "?name=" + encodeURIComponent(domain) + "&type=1", {
+        headers: { accept: "application/dns-json" },
+        signal: ctrl.signal,
+      });
+      clearTimeout(to);
+      if (!r.ok) throw new Error("DoH " + r.status);
+      const j = await r.json();
+      // 成功拿到响应即返回（空结果也算有效响应，不重试）
+      return (j.Answer || [])
+        .filter((a) => a.type === 1 && typeof a.data === "string")
+        .map((a) => a.data);
+    } catch (e) {
+      clearTimeout(to);
+      lastErr = e;
+      if (attempt < maxAttempts) await new Promise((res) => setTimeout(res, 500 * attempt));
+    }
   }
+  throw lastErr;
 }
 
 // IP -> 是否 CF 的浏览器端缓存（去重，减少 /api/cf-check 调用）
