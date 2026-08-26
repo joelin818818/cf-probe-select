@@ -25,6 +25,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 必须拉取完整历史，否则浅克隆下 git log 无法追溯到 worker/ 文件的最后提交，
+          # 会导致 WORKER_VERSION 计算为空、版本号回落到部署时刻而每次都变。
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -83,6 +87,12 @@ jobs:
               return bj.strftime("%y%m%d%H%M")
 
           ver = worker_version()
+          # 若 git 历史取不到（极少见），保留 wrangler.toml 现有 WORKER_VERSION，
+          # 避免写成空值导致 worker.js 回落到部署时刻（版本号每次都变）。
+          if not ver:
+              m = re.search(r'WORKER_VERSION\s*=\s*"([^"]*)"', s)
+              if m:
+                  ver = m.group(1)
 
           # 确保 [vars] 段存在
           def ensure_vars(text):
