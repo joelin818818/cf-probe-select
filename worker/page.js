@@ -30,7 +30,7 @@ const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "
 // 浏览器端本地函数：兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key
 // （注意：本脚本是浏览器内联脚本，无 import，故在此自包含定义）
 function normalizeProviderKey(key) {
-  const valid = ["local","aliyun","dnssb","google","custom"];
+  const valid = ["local","aliyun","dnssb","cf_gateway","google","custom"];
   return valid.indexOf(key) >= 0 ? key : "local";
 }
 function loadProvider() {

@@ -50,6 +50,7 @@ export const DNS_PROVIDER_LIST = [
   // 为业界公认支持 CORS 的 DoH。
   { key: "aliyun", label: "阿里 DoH（国内）", doh: "https://dns.alidns.com/resolve" },
   { key: "dnssb", label: "DNS.SB DoH（香港）", doh: "https://doh.dns.sb/dns-query" },
+  { key: "cf_gateway", label: "Cloudflare Gateway DoH", doh: "https://1234567890qwertyuiop.cloudflare-gateway.com/dns-query" },
   { key: "google", label: "Google DoH（国际）", doh: "https://dns.google/resolve" },
   { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },
 ];
