@@ -1,5 +1,0 @@
-新增 Cloudflare Gateway DoH 固定选项
-
-- 实测可用：返回 200、CORS 头 *、支持 ?name=&type= JSON 查询
-- 地址：https://1234567890qwertyuiop.cloudflare-gateway.com/dns-query
-- 作为「Cloudflare Gateway DoH」加入 DNS_PROVIDER_LIST，与阿里/DNS.SB/Google/本地/自定义并列
