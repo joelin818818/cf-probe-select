@@ -587,7 +587,12 @@ def run_cf_explorer():
                 f.write("# CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积，脚本自动更新请勿手动编辑）\n")
                 f.write(f"# 更新时间：北京时间 {bj_str} / 世界时间(UTC) {utc_str}\n")
                 for d in sorted(saved):
-                    f.write(d + "\n")
+                    # 落盘规范化：剥离可能的协议头/路径/端口，只保留纯域名
+                    d = d.strip().lower()
+                    if "://" in d:
+                        d = d.split("://", 1)[1].split("/")[0].split(":")[0]
+                    if d:
+                        f.write(d + "\n")
             print(f"[*] 已全量写回 {len(saved)} 个域名 -> {OUTPUT_FILE}")
         except Exception as e:
             print(f"[!] 写回失败: {e}")

@@ -1,2 +1,7 @@
 # CF 探测优选结果（每行一个纯域名，由 GitHub Actions 自动累积，脚本自动更新请勿手动编辑）
 # 更新时间：北京时间 2026-08-26 16:22:07 / 世界时间(UTC) 2026-08-26 08:22:07
+sc.news.gov.hk
+www.icac.org.hk
+www.news.gov.hk
+www.redcross.org.hk
+www.hkcna.hk
