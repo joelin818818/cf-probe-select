@@ -43,10 +43,13 @@ function bjVersion() {
 // 用数组固定下拉顺序（对象在含数字键 "360" 时枚举顺序会乱）
 export const DNS_PROVIDER_LIST = [
   { key: "local", label: "本地（服务端 DNS）", doh: "", note: "服务端运行环境默认递归解析" },
-  { key: "aliyun", label: "阿里 DoH", doh: "https://dns.alidns.com/dns-query" },
+  // 注意：以下公开 DoH 均使用各服务商的 JSON API 端点（application/dns-json）。
+  // 阿里/360/Google 的 JSON 端点为 /resolve；腾讯/Cloudflare 为 /dns-query。
+  // OpenDNS 在中国网络/浏览器环境下常因 CORS 或网络拦截不可用，仍保留选项但建议优先用其他服务商。
+  { key: "aliyun", label: "阿里 DoH", doh: "https://dns.alidns.com/resolve" },
   { key: "tencent", label: "腾讯 DoH", doh: "https://doh.pub/dns-query" },
-  { key: "qihoo360", label: "360 DoH", doh: "https://doh.360.cn/dns-query" },
-  { key: "google", label: "Google DoH", doh: "https://dns.google/dns-query" },
+  { key: "qihoo360", label: "360 DoH", doh: "https://doh.360.cn/resolve" },
+  { key: "google", label: "Google DoH", doh: "https://dns.google/resolve" },
   { key: "cloudflare", label: "Cloudflare DoH", doh: "https://1.1.1.1/dns-query" },
   { key: "opendns", label: "OpenDNS DoH", doh: "https://doh.opendns.com/dns-query" },
   { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },

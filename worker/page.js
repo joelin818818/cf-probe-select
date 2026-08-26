@@ -245,8 +245,12 @@ async function preflightCheck() {
     return true;
   } catch (e) {
     let extra = "";
-    if (provider === "custom") extra = "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + doh + " 并点「继续」）";
-    alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\\n" + doh + "\\n错误：" + e.message + extra + "\\n请更换其他 DNS 服务商");
+    if (provider === "custom") {
+      extra = "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + doh + " 并点「继续」）";
+    } else {
+      extra = "\\n提示：部分公开 DoH（如 OpenDNS、Google、阿里等）在特定网络或浏览器环境下可能因 CORS/网络拦截不可用，可尝试「腾讯 DoH」「Cloudflare DoH」「本地」或使用自定义 DoH。";
+    }
+    alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\\n" + doh + "\\n错误：" + e.message + extra);
     return false;
   }
 }
