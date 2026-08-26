@@ -269,7 +269,8 @@ async function startTest() {
     try { await resolveOne(d); } catch (e) { ipMap[d] = []; }
     resolvedCount++;
     stateMap[d].phase = "resolved";
-    stateMap[d].status = "resolved";
+    // 解析无 IP 时标记为失败，而不是显示"解析完成，待测速"
+    stateMap[d].status = (ipMap[d] && ipMap[d].length) ? "resolved" : "err";
     if (resolvedCount % RENDER_EVERY === 0 || resolvedCount === domains.length) {
       setInfo("解析 " + resolvedCount + "/" + domains.length + " · 测速 0/" + domains.length);
       render();
@@ -282,6 +283,17 @@ async function startTest() {
   setInfo("测速中…");
   const measureTasks = domains.map((d) => async () => {
     if (stopRequested) return;
+    // 无 IP 的域名直接跳过测速，避免无意义请求并显示"解析失败"
+    if (!ipMap[d] || !ipMap[d].length) {
+      stateMap[d].phase = "done";
+      stateMap[d].status = "err";
+      measuredCount++;
+      if (measuredCount % RENDER_EVERY === 0 || measuredCount === domains.length) {
+        setInfo("解析 " + resolvedCount + "/" + domains.length + " · 测速 " + measuredCount + "/" + domains.length);
+        render();
+      }
+      return;
+    }
     stateMap[d].phase = "measuring";
     stateMap[d].status = "measuring";
     try {
@@ -342,10 +354,12 @@ function ipHtml(domain) {
 }
 function latHtml(d) {
   const s = stateMap[d];
-  if (!s || s.phase === "idle" || s.phase === "resolving" || s.phase === "resolved") {
-    if (s && (s.phase === "resolving" || s.phase === "resolved")) return '<span class="status">解析完成，待测速</span>';
+  if (!s || s.phase === "idle" || s.phase === "resolving" || (s.phase === "resolved" && s.status === "resolved")) {
+    if (s && s.phase === "resolving") return '<span class="status">解析中…</span>';
+    if (s && s.phase === "resolved") return '<span class="status">解析完成，待测速</span>';
     return '<span class="badge">—</span>';
   }
+  if (s.status === "err") return '<span class="status err">解析失败</span>';
   if (s.phase === "measuring") return '<span class="status">测速中…</span>';
   if (!s.rounds) return '<span class="badge">—</span>';
   const roundStr = s.rounds.map((x) => {
