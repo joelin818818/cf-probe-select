@@ -205,8 +205,12 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // 版本号优先用 GitHub Actions 写入的 worker 文件提交时间（稳定），
+    // 仅在未配置 env.WORKER_VERSION 时回落到部署时刻（兜底）。
+    const version = (env && env.WORKER_VERSION) || bjVersion();
+
     if (path === "/" || path === "/index.html") {
-      return new Response(html(bjVersion()), {
+      return new Response(html(version), {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
@@ -219,7 +223,7 @@ export default {
     }
 
     if (path === "/api/health") {
-      return json({ ok: true, version: bjVersion() });
+      return json({ ok: true, version: version });
     }
 
     if (path === "/api/domains") {

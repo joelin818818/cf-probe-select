@@ -1,6 +1,10 @@
 name: CF Probe Select
 
 on:
+  push:
+    paths:
+      - 'worker/worker.js'
+      - 'worker/page.js'
   schedule:
     # 每天 UTC 00:00 运行（北京时间 08:00）
     - cron: "0 0 * * *"
@@ -46,25 +50,60 @@ jobs:
         # 探测时长由脚本内部 PROBE_TIME_LIMIT 控制（600s）
         run: python cf_probe_select.py
 
-      - name: Point RAW_DOMAINS_URL to current repo (fork-friendly)
+      - name: Update wrangler.toml vars (fork-friendly + worker version)
         run: |
           python3 - <<'PY'
-          import os, re
+          import os, re, subprocess
+          from datetime import datetime, timezone, timedelta
+
           repo = os.environ["GITHUB_REPOSITORY"]
           url = f"https://raw.githubusercontent.com/{repo}/main/cf_domains.txt"
           changed = False
 
-          # 更新 wrangler.toml 的 [vars] RAW_DOMAINS_URL（不存在则追加段）
+          # 取 worker/worker.js 与 worker/page.js 的最新提交时间作为前端版本号
+          def worker_version():
+              files = ["worker/worker.js", "worker/page.js"]
+              latest = None
+              for f in files:
+                  try:
+                      ts = subprocess.check_output(
+                          ["git", "log", "-1", "--format=%cI", "--", f],
+                          text=True
+                      ).strip()
+                      if not ts:
+                          continue
+                      dt = datetime.fromisoformat(ts)
+                      if latest is None or dt > latest:
+                          latest = dt
+                  except Exception:
+                      continue
+              if not latest:
+                  return ""
+              bj = latest.astimezone(timezone(timedelta(hours=8)))
+              return bj.strftime("%y%m%d%H%M")
+
+          ver = worker_version()
+
+          # 确保 [vars] 段存在
+          def ensure_vars(text):
+              if "[vars]" not in text:
+                  return text.rstrip() + "\n\n[vars]\n"
+              return text
+
+          # 更新或追加某个 [vars] 键值
+          def set_var(text, key, value):
+              pattern = rf'{key}\s*=\s*"[^"]*"'
+              replacement = f'{key} = "{value}"'
+              if re.search(pattern, text):
+                  return re.sub(pattern, replacement, text)
+              return text + f'{key} = "{value}"\n'
+
+          # 更新 wrangler.toml 的 [vars]（RAW_DOMAINS_URL + WORKER_VERSION）
           toml = "wrangler.toml"
           s = open(toml, encoding="utf-8").read()
-          if "RAW_DOMAINS_URL" in s:
-              new_s = re.sub(r'RAW_DOMAINS_URL\s*=\s*"[^"]*"',
-                             f'RAW_DOMAINS_URL = "{url}"', s)
-          else:
-              new_s = s
-              if "[vars]" not in s:
-                  new_s = s.rstrip() + "\n\n[vars]\n"
-              new_s += f'RAW_DOMAINS_URL = "{url}"\n'
+          new_s = ensure_vars(s)
+          new_s = set_var(new_s, "RAW_DOMAINS_URL", url)
+          new_s = set_var(new_s, "WORKER_VERSION", ver)
           if new_s != s:
               open(toml, "w", encoding="utf-8").write(new_s)
               changed = True
@@ -79,9 +118,9 @@ jobs:
               changed = True
 
           if changed:
-              print("RAW_DOMAINS_URL updated ->", url)
+              print("wrangler.toml updated: RAW_DOMAINS_URL ->", url, "WORKER_VERSION ->", ver)
           else:
-              print("RAW_DOMAINS_URL already matches current repo, skip update")
+              print("RAW_DOMAINS_URL and WORKER_VERSION already match, skip update")
           PY
 
       - name: Commit and push results
@@ -89,7 +128,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add cf_domains.txt wrangler.toml worker/worker.js
-          if [ -z "$(git status --porcelain cf_domains.txt)" ]; then
+          if [ -z "$(git status --porcelain)" ]; then
             echo "无变更，跳过提交"
           else
             git commit -m "chore: 自动探测更新 $(TZ=Asia/Shanghai date +%Y-%m-%dT%H:%M:%S)"
