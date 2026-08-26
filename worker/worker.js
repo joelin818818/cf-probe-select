@@ -120,11 +120,12 @@ function isIpInCf(ip, ranges) {
 }
 
 function getAFromAnswer(ans, wantV6) {
+  const type = wantV6 ? 28 : 1;
+  const out = [];
   for (const a of ans || []) {
-    if (a.type === 1 && !wantV6) return a.data;
-    if (a.type === 28 && wantV6) return a.data;
+    if (a.type === type && typeof a.data === "string") out.push(a.data);
   }
-  return null;
+  return out;
 }
 
 async function dohFetch(doh, domain, wantV6) {
@@ -135,8 +136,7 @@ async function dohFetch(doh, domain, wantV6) {
   });
   if (!r.ok) throw new Error("DoH " + r.status);
   const j = await r.json();
-  const ip = getAFromAnswer(j.Answer, wantV6);
-  return ip ? [ip] : [];
+  return getAFromAnswer(j.Answer, wantV6);
 }
 
 // 解析域名 A 记录（支持多 DoH 兜底），返回 { ips, doh, cf }

@@ -459,7 +459,7 @@ function render() {
     const bestCls = d === best ? "best" : "";
     html += '<tr class="row ' + cls.join(" ") + '" data-d="' + esc(d) + '">';
     html += '<td class="rank">' + (bestCls ? "★" : i + 1) + "</td>";
-    html += "<td>" + esc(d) + "</td>";
+    html += '<td><a class="domain-link" href="https://' + esc(d) + '" target="_blank" rel="noopener noreferrer">' + esc(d) + "</a></td>";
     html += "<td>" + ipHtml(d) + "</td>";
     html += "<td>" + cfHtml(d) + "</td>";
     html += "<td>" + latHtml(d) + "</td>";
@@ -599,6 +599,8 @@ export function html(version) {
   .empty { color: var(--muted); padding: 40px; text-align: center; }
   .rank { color: var(--muted); width: 40px; }
   .best { color: var(--accent); font-weight: 700; }
+  a.domain-link { color: var(--fg); text-decoration: none; }
+  a.domain-link:hover { color: var(--accent); text-decoration: underline; }
 </style>
 </head>
 <body>
