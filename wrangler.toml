@@ -1,4 +1,4 @@
-name = "cf-probe-select-speed"
+name = "cf-probe-select"
 main = "worker/worker.js"
 compatibility_date = "2024-09-23"
 
