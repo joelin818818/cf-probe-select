@@ -182,8 +182,13 @@ async function testDoh(doh) {
 // ====================================================================
 // cf_domains.txt 在 GitHub 仓库的位置（main 分支）
 // 直接走 GitHub 官方 raw 域名，避免第三方代理（dl.lbcn.top 等）失效导致读取不到列表
+// --------------------------------------------------------------------
+// fork 友好：部署时优先用 wrangler.toml 的 [vars] RAW_DOMAINS_URL（由
+// .github/workflows/probe.yml 自动检测当前仓库地址写入），未配置则回退以下默认值
+// （上游仓库）。这样 clone 后即便未做任何配置也能直接运行，fork 后也不会锁死在
+// 上游仓库。
 // ====================================================================
-const RAW_DOMAINS_URL =
+const DEFAULT_RAW_DOMAINS_URL =
   "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 
 function json(body, status = 200, headers = {}) {
@@ -220,6 +225,9 @@ export default {
     }
 
     if (path === "/api/domains") {
+      // 优先用 wrangler.toml 的 [vars] RAW_DOMAINS_URL（fork 后可自动改成自己的仓库），
+      // 未配置时回退到默认值（上游仓库）。
+      const RAW_DOMAINS_URL = (env && env.RAW_DOMAINS_URL) || DEFAULT_RAW_DOMAINS_URL;
       // 加时间戳绕过 raw.githubusercontent.com CDN 缓存，确保实时
       const nocacheUrl = RAW_DOMAINS_URL + "?t=" + Date.now();
       let res;

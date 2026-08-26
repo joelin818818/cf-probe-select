@@ -8,3 +8,8 @@ compatibility_date = "2024-09-23"
 # ]
 
 # 无需 KV / D1，域名列表运行时从 GitHub raw 拉取
+
+# 域名列表来源（fork 后由 .github/workflows/probe.yml 自动改成你的仓库地址）。
+# 删除此行即回落到 worker.js 内的默认地址（上游仓库）。
+[vars]
+RAW_DOMAINS_URL = "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt"

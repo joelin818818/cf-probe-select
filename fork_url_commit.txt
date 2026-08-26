@@ -1,0 +1,5 @@
+改为 fork 友好的域名列表地址（RAW_DOMAINS_URL 可配置）
+
+- worker.js：RAW_DOMAINS_URL 改为运行时从 env.RAW_DOMAINS_URL 读取，未配置回退默认值（上游仓库），不再硬编码锁死
+- wrangler.toml：新增 [vars] RAW_DOMAINS_URL，支持部署时覆盖
+- probe.yml：探测后自动检测 github.repository，把 RAW_DOMAINS_URL 改写成当前仓库地址，随 cf_domains.txt 一并提交，fork 后不再指向原仓库
