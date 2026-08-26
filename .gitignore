@@ -17,4 +17,7 @@ venv/
 .wrangler/
 worker/.wrangler/
 
+# 临时提交说明文件（仅本地用，不入库）
+msg.txt
+
 # 注意：cf_domains.txt 需纳入版本控制（探测结果回推仓库），不再忽略
