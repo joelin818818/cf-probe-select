@@ -641,10 +641,6 @@ def run_cf_explorer():
         is_cf = is_cloudflare_domain(current)
         root = get_registered_domain(current)
 
-        with state_lock:
-            if root in non_cf_roots and current != root:
-                return
-
         print(f"[?] 检测: {current:<40}", end="", flush=True)
 
         if is_big_tech(current):
@@ -669,10 +665,10 @@ def run_cf_explorer():
                 new_added += 1
             _expand(current, enqueue, visited, non_cf_roots, priority=True, lock=state_lock)
         else:
-            print(" -> [非 Cloudflare 跳过]")
-            if current == root:
-                with state_lock:
-                    non_cf_roots.add(root)
+            # 非 CF 域名本身不入库，但继续扩散其外链，
+            # 顺着外链可能挖到走 Cloudflare 的第三方站，直到 PROBE_TIME_LIMIT 用完。
+            print(" -> [非 Cloudflare 仅扩散外链]")
+            _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
 
     with ThreadPoolExecutor(max_workers=10) as pool:
         while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
@@ -710,11 +706,11 @@ def _expand(current, enqueue, visited, non_cf_roots, priority: bool = False, loc
                     check = False
                     if lock:
                         with lock:
-                            if nd not in visited and nd_root not in non_cf_roots:
+                            if nd not in visited:
                                 visited.add(nd)
                                 check = True
                     else:
-                        if nd not in visited and nd_root not in non_cf_roots:
+                        if nd not in visited:
                             visited.add(nd)
                             check = True
                     if check:
