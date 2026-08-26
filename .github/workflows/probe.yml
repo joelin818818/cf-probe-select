@@ -52,24 +52,36 @@ jobs:
           import os, re
           repo = os.environ["GITHUB_REPOSITORY"]
           url = f"https://raw.githubusercontent.com/{repo}/main/cf_domains.txt"
+          changed = False
+
           # 更新 wrangler.toml 的 [vars] RAW_DOMAINS_URL（不存在则追加段）
           toml = "wrangler.toml"
           s = open(toml, encoding="utf-8").read()
           if "RAW_DOMAINS_URL" in s:
-              s = re.sub(r'RAW_DOMAINS_URL\s*=\s*"[^"]*"',
-                         f'RAW_DOMAINS_URL = "{url}"', s)
+              new_s = re.sub(r'RAW_DOMAINS_URL\s*=\s*"[^"]*"',
+                             f'RAW_DOMAINS_URL = "{url}"', s)
           else:
+              new_s = s
               if "[vars]" not in s:
-                  s = s.rstrip() + "\n\n[vars]\n"
-              s += f'RAW_DOMAINS_URL = "{url}"\n'
-              open(toml, "w", encoding="utf-8").write(s)
+                  new_s = s.rstrip() + "\n\n[vars]\n"
+              new_s += f'RAW_DOMAINS_URL = "{url}"\n'
+          if new_s != s:
+              open(toml, "w", encoding="utf-8").write(new_s)
+              changed = True
+
           # 更新 worker.js 的默认值常量（保持与 vars 一致，env 优先时取不到也能用）
           w = "worker/worker.js"
           ws = open(w, encoding="utf-8").read()
-          ws = re.sub(r'const DEFAULT_RAW_DOMAINS_URL\s*=\s*"[^"]*"',
-                      f'const DEFAULT_RAW_DOMAINS_URL = "{url}"', ws)
-          open(w, "w", encoding="utf-8").write(ws)
-          print("RAW_DOMAINS_URL ->", url)
+          new_ws = re.sub(r'const DEFAULT_RAW_DOMAINS_URL\s*=\s*"[^"]*"',
+                          f'const DEFAULT_RAW_DOMAINS_URL = "{url}"', ws)
+          if new_ws != ws:
+              open(w, "w", encoding="utf-8").write(new_ws)
+              changed = True
+
+          if changed:
+              print("RAW_DOMAINS_URL updated ->", url)
+          else:
+              print("RAW_DOMAINS_URL already matches current repo, skip update")
           PY
 
       - name: Commit and push results

@@ -188,8 +188,7 @@ async function testDoh(doh) {
 // （上游仓库）。这样 clone 后即便未做任何配置也能直接运行，fork 后也不会锁死在
 // 上游仓库。
 // ====================================================================
-const DEFAULT_RAW_DOMAINS_URL =
-  "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
+const DEFAULT_RAW_DOMAINS_URL = "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 
 function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
