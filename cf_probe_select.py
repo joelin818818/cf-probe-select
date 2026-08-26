@@ -341,7 +341,7 @@ def resolve_via_udp_dns(domain: str, server: str, timeout: int = 5) -> list:
 
 def resolve_via_doh(domain: str, base_url: str, timeout: int = 5) -> list:
     try:
-        url = base_url + "?name=" + domain + "&type=A"
+        url = base_url + "?name=" + domain + "&type=1"
         r = HTTP_SESSION.get(url, headers={"Accept": "application/dns-json"}, timeout=timeout)
         if not r.ok:
             return []
@@ -356,14 +356,17 @@ def resolve_via_doh(domain: str, base_url: str, timeout: int = 5) -> list:
 
 
 # ==================== 修改点 1 ====================
-# 多地区/多源解析器：系统 DNS + 国内 DoH (字节/360/腾讯) + 全球 DoH (Google/Cloudflare)
+# 多源解析器：系统 DNS + 国内 DoH（腾讯/阿里）+ 全球 DoH（DNS.SB/Cloudflare Gateway/Google）
+# 与网页侧可信 DoH 对齐；移除在 Actions 网络下不稳定的 volcengine / 360 / cloudflare-dns.com。
+# 注：脚本跑在 GitHub Actions 服务端（无浏览器、无 CORS 限制），故腾讯 doh.pub 可用。
+# Cloudflare Gateway 地址与网页侧一致；fork 后若无法访问可自行替换为自己的 Gateway。
 DNS_RESOLVERS = [
     ("system", "udp", None),
-    ("volcengine-doh", "doh", "https://minidns.volcengineapi.com/dns-query"),
-    ("360-doh", "doh", "https://doh.360.cn/dns-query"),
     ("tencent-doh", "doh", "https://doh.pub/dns-query"),
+    ("aliyun-doh", "doh", "https://dns.alidns.com/resolve"),
+    ("dnssb-doh", "doh", "https://doh.dns.sb/dns-query"),
+    ("cf-gateway-doh", "doh", "https://1234567890qwertyuiop.cloudflare-gateway.com/dns-query"),
     ("google-doh", "doh", "https://dns.google/resolve"),
-    ("cloudflare-doh", "doh", "https://cloudflare-dns.com/dns-query"),
 ]
 
 
