@@ -1,0 +1,5 @@
+调整 DoH 服务商：移除不可达的 AdGuard 与 Quad9
+
+- 移除 AdGuard（国内网络不可达）
+- 移除 Quad9（仅支持 wire-format 返回 400，且国内不可达）
+- 保留：本地、阿里（国内·CORS）、DNS.SB（香港·CORS）、Google（国际）、自定义

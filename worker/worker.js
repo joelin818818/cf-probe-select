@@ -51,8 +51,6 @@ export const DNS_PROVIDER_LIST = [
   { key: "aliyun", label: "阿里 DoH（国内）", doh: "https://dns.alidns.com/resolve" },
   { key: "dnssb", label: "DNS.SB DoH（香港）", doh: "https://doh.dns.sb/dns-query" },
   { key: "google", label: "Google DoH（国际）", doh: "https://dns.google/resolve" },
-  { key: "adguard", label: "AdGuard DoH（国际）", doh: "https://dns.adguard-dns.com/dns-query" },
-  { key: "quad9", label: "Quad9 DoH（国际）", doh: "https://dns.quad9.net/dns-query" },
   { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },
 ];
 
