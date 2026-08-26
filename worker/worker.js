@@ -184,9 +184,8 @@ async function testDoh(doh) {
 // 直接走 GitHub 官方 raw 域名，避免第三方代理（dl.lbcn.top 等）失效导致读取不到列表
 // --------------------------------------------------------------------
 // fork 友好：部署时优先用 wrangler.toml 的 [vars] RAW_DOMAINS_URL（由
-// .github/workflows/probe.yml 自动检测当前仓库地址写入），未配置则回退以下默认值
-// （上游仓库）。这样 clone 后即便未做任何配置也能直接运行，fork 后也不会锁死在
-// 上游仓库。
+// .github/workflows/probe.yml 自动检测当前仓库地址写入）。未配置则回退以下默认值：
+// 初始为上游仓库；fork 后 Actions 会自动改写成 fork 仓库地址，避免锁死在上游。
 // ====================================================================
 const DEFAULT_RAW_DOMAINS_URL = "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 

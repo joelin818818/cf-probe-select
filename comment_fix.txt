@@ -1,0 +1,4 @@
+修正 DEFAULT_RAW_DOMAINS_URL 注释，避免 fork 后语义错误
+
+- 原注释写“默认值（上游仓库）”，fork 后 Actions 已把默认值改为 fork 仓库自身，注释会误导
+- 改为：初始为上游仓库，fork 后 Actions 自动改写成 fork 仓库地址
