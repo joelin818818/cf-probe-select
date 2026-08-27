@@ -450,6 +450,24 @@ function esc(s) {
     .replace(/"/g, "&quot;");
 }
 
+function updateStats() {
+  let resolving = 0, measuring = 0, ok = 0, err = 0;
+  for (const d of domains) {
+    const s = stateMap[d];
+    if (!s) continue;
+    if (s.phase === "resolving" || s.status === "resolving") resolving++;
+    else if (s.phase === "measuring" || s.status === "measuring") measuring++;
+    else if (s.status === "ok") ok++;
+    else if (s.status === "err" || s.status === "timeout") err++;
+  }
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set("stat-total", domains.length);
+  set("stat-resolving", resolving);
+  set("stat-measuring", measuring);
+  set("stat-ok", ok);
+  set("stat-err", err);
+}
+
 function render() {
   const rows = sortRows();
   const best = rows.find((d) => stateMap[d] && stateMap[d].status === "ok" && stateMap[d].avg != null);
@@ -470,6 +488,7 @@ function render() {
     html += "</tr>";
   });
   tbody.innerHTML = html;
+  updateStats();
 }
 
 // ---- 控件初始化 ----
@@ -555,15 +574,15 @@ export function html(version) {
 <title>CF 探测优选 v${version || ""}</title>
 <style>
   :root {
-    --bg: #e9e5db;
+    --bg: #eef1f0;
     --surface: #ffffff;
-    --surface-2: #f5f3ef;
-    --fg: #596b80;
+    --surface-2: #f5f7f6;
+    --fg: #4d5e6e;
     --fg-muted: #7a8a9c;
-    --line: #bccfe4;
-    --line-strong: #a3bad4;
-    --accent: #596b80;
-    --accent-hover: #6b7d91;
+    --line: #e3e8ef;
+    --line-strong: #cdd8e2;
+    --accent: #2f9e8f;
+    --accent-hover: #3aae9e;
     --good: #4d9b7c;
     --bad: #c75b55;
     --warn: #c99a3c;
@@ -572,7 +591,7 @@ export function html(version) {
   body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.5; }
   header {
     padding: 16px 24px;
-    background: linear-gradient(135deg, #bccfe4 0%, #e9e5db 100%);
+    background: linear-gradient(135deg, #c9e8e2 0%, #eef1f0 100%);
     border-bottom: 1px solid var(--line);
     display: flex;
     align-items: center;
@@ -622,6 +641,12 @@ export function html(version) {
   button.ghost { background: transparent; border: 1px solid var(--line); color: var(--fg); }
   button.ghost:hover { background: rgba(188,207,228,0.25); }
   button:disabled { opacity: .5; cursor: not-allowed; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin: 16px 24px 0; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: 0 2px 8px rgba(47,158,143,0.06); }
+  .stat-num { font-size: 26px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .stat-num.ok { color: var(--good); }
+  .stat-num.err { color: var(--bad); }
+  .stat-label { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
   .status { color: var(--fg-muted); font-size: 13px; }
   .wrap { padding: 16px 24px 40px; overflow-x: auto; }
   table {
@@ -701,6 +726,14 @@ export function html(version) {
     <input id="measureThreads" type="number" min="1" max="32" value="10">
   </label>
   <span class="status" id="info">DNS 解析除「本地」走服务端外，均由你的浏览器直连 DoH；测速对每个域名发 HTTPS 请求测 3 轮（间隔 2 秒）取平均，按综合排序</span>
+</div>
+
+<div class="stats" id="stats">
+  <div class="stat"><div class="stat-num" id="stat-total">0</div><div class="stat-label">总域名</div></div>
+  <div class="stat"><div class="stat-num" id="stat-resolving">0</div><div class="stat-label">解析中</div></div>
+  <div class="stat"><div class="stat-num" id="stat-measuring">0</div><div class="stat-label">测速中</div></div>
+  <div class="stat"><div class="stat-num ok" id="stat-ok">0</div><div class="stat-label">可达</div></div>
+  <div class="stat"><div class="stat-num err" id="stat-err">0</div><div class="stat-label">失败</div></div>
 </div>
 
 <div class="wrap">
