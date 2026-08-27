@@ -1,13 +1,9 @@
 name: CF Probe Select
 
 on:
-  push:
-    paths:
-      - 'worker/worker.js'
-      - 'worker/page.js'
   schedule:
-    # 每天 UTC 00:00 运行（北京时间 08:00）
-    - cron: "0 0 * * *"
+    # 每天 UTC 06:30 运行（北京时间 14:30），避开高峰时段减少排队
+    - cron: "30 6 * * *"
   workflow_dispatch: {}
 
 permissions:
