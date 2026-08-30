@@ -451,19 +451,23 @@ function esc(s) {
 }
 
 function updateStats() {
-  let resolving = 0, measuring = 0, ok = 0, err = 0;
+  let remainingResolve = 0, remainingMeasure = 0, ok = 0, err = 0;
   for (const d of domains) {
     const s = stateMap[d];
-    if (!s) continue;
-    if (s.phase === "resolving" || s.status === "resolving") resolving++;
-    else if (s.phase === "measuring" || s.status === "measuring") measuring++;
-    else if (s.status === "ok") ok++;
+    if (!s) { remainingResolve++; continue; }
+    if (s.phase === "idle" || s.phase === "resolving") {
+      remainingResolve++;
+    }
+    if (s.phase === "resolved" || s.phase === "measuring") {
+      remainingMeasure++;
+    }
+    if (s.status === "ok") ok++;
     else if (s.status === "err" || s.status === "timeout") err++;
   }
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
   set("stat-total", domains.length);
-  set("stat-resolving", resolving);
-  set("stat-measuring", measuring);
+  set("stat-resolving", remainingResolve);
+  set("stat-measuring", remainingMeasure);
   set("stat-ok", ok);
   set("stat-err", err);
 }
@@ -730,8 +734,8 @@ export function html(version) {
 
 <div class="stats" id="stats">
   <div class="stat"><div class="stat-num" id="stat-total">0</div><div class="stat-label">总域名</div></div>
-  <div class="stat"><div class="stat-num" id="stat-resolving">0</div><div class="stat-label">解析中</div></div>
-  <div class="stat"><div class="stat-num" id="stat-measuring">0</div><div class="stat-label">测速中</div></div>
+  <div class="stat"><div class="stat-num" id="stat-resolving">0</div><div class="stat-label">剩余解析</div></div>
+  <div class="stat"><div class="stat-num" id="stat-measuring">0</div><div class="stat-label">剩余测速</div></div>
   <div class="stat"><div class="stat-num ok" id="stat-ok">0</div><div class="stat-label">可达</div></div>
   <div class="stat"><div class="stat-num err" id="stat-err">0</div><div class="stat-label">失败</div></div>
 </div>
