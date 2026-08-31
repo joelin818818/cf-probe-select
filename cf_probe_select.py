@@ -1,14 +1,11 @@
 import bisect
 import html
-import importlib
 import ipaddress
 import os
 import random
 import re
 import socket
 import string
-import subprocess
-import sys
 import threading
 import time
 import warnings
@@ -17,7 +14,9 @@ from collections import deque, defaultdict
 from functools import lru_cache
 from urllib.parse import unquote, urljoin, urlparse
 
-from bs4 import XMLParsedAsHTMLWarning
+import requests
+import tldextract
+from bs4 import XMLParsedAsHTMLWarning, BeautifulSoup
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -65,51 +64,7 @@ def random_gateway_sub(n: int = GATEWAY_SUB_LEN) -> str:
     return "".join(random.choice(alphabet) for _ in range(n))
 
 
-# ==================== 1. 自动检测并安装依赖库 ====================
-REQUIRED_PACKAGES = {
-    "requests": "requests",
-    "bs4": "beautifulsoup4",
-    "tldextract": "tldextract",
-}
-
-
-def ensure_dependencies():
-    need_install = []
-    for mod_name, pip_name in REQUIRED_PACKAGES.items():
-        try:
-            importlib.import_module(mod_name)
-        except ImportError:
-            need_install.append(pip_name)
-
-    if need_install:
-        print(f"[*] 检测到缺少依赖库: {', '.join(need_install)}，正在自动安装...")
-        for package in need_install:
-            try:
-                cmd = [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    package,
-                    "-i",
-                    "https://pypi.tuna.tsinghua.edu.cn/simple",
-                ]
-                subprocess.check_call(
-                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-                print(f"[+] [{package}] 安装成功")
-            except subprocess.CalledProcessError:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-        print("[*] 依赖库就绪\n" + "=" * 60)
-
-
-ensure_dependencies()
-
-import requests  # noqa: E402
-import tldextract  # noqa: E402
-from bs4 import BeautifulSoup  # noqa: E402
-
-# ==================== 2. 核心配置 ====================
+# ==================== 1. 核心配置 ====================
 
 # Cloudflare 官方 IPv4 CIDR 列表（启动时会拉取最新，失败则用此兜底）
 CF_IP_RANGES_FALLBACK = [

@@ -61,6 +61,17 @@ Cloudflare Gateway DoH 的子域在**每次打开网页时随机生成**（10 �
 
 由 GitHub Actions 定时运行，广度优先爬取外链、累积走 Cloudflare 的域名。
 
+### 本地手动运行
+
+第三方依赖统一声明在 `requirements.txt`，运行前安装即可（脚本本身不再内置自动安装逻辑，更专注于探测业务）：
+
+```bash
+pip install -r requirements.txt
+python cf_probe_select.py
+```
+
+GitHub Actions 已自动执行相同的安装步骤，fork 后无需额外配置。
+
 - 探测阶段：单源系统 DNS + CF IP 段硬过滤（不认 Server 头），CF IP 段用二分查找判定。
 - 落盘前：6 套 DoH（系统 / 腾讯 / 阿里 / DNS.SB / Cloudflare Gateway / Google）校验。
   判定规则：**解析失败的源直接忽略**，只有「成功解析的源」里出现非 CF IP 才剔除该域名；所有源都解析失败则视为域名失效并删除。
