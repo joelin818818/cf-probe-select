@@ -50,7 +50,10 @@ export const DNS_PROVIDER_LIST = [
   // 为业界公认支持 CORS 的 DoH。
   { key: "aliyun", label: "阿里 DoH（国内）", doh: "https://dns.alidns.com/resolve" },
   { key: "dnssb", label: "DNS.SB DoH（香港）", doh: "https://doh.dns.sb/dns-query" },
-  { key: "cf_gateway", label: "Cloudflare Gateway DoH", doh: "https://1234567890qwertyuiop.cloudflare-gateway.com/dns-query" },
+  // Gateway DoH 接受任意子域（作为匿名 location）。固定子域长期暴露易被针对性限速，
+  // 故每次渲染页面时随机生成一个 10 位「小写字母 + 数字」子域（替换模板里的 {sub}），
+  // 让每次打开网页拿到的 endpoint 都不同。见 randomGatewaySub() 与 page.js 的注入逻辑。
+  { key: "cf_gateway", label: "Cloudflare Gateway DoH（随机子域）", doh: "https://{sub}.cloudflare-gateway.com/dns-query", randomSubdomain: true },
   { key: "google", label: "Google DoH（国际）", doh: "https://dns.google/resolve" },
   { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },
 ];
@@ -61,6 +64,21 @@ export const DNS_PROVIDERS = Object.fromEntries(
 
 export function normalizeProviderKey(key) {
   return DNS_PROVIDERS[key] ? key : "local";
+}
+
+// 生成 n 位「小写字母 + 数字」随机串，用作 Cloudflare Gateway DoH 的随机子域。
+// 每次渲染页面 / 每次服务端解析各生成一次，整页共用以保证预检与解析结果一致。
+export function randomGatewaySub(n = 10) {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let s = "";
+  for (let i = 0; i < n; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+// 把 DoH 模板里的 {sub} 替换为随机子域（仅 randomSubdomain 的服务商需要）
+export function materializeDoh(p) {
+  if (!p || !p.doh) return "";
+  return p.randomSubdomain ? p.doh.replace("{sub}", randomGatewaySub()) : p.doh;
 }
 
 // 仅用于 "local"（服务端解析）：返回服务端使用的 DoH 列表。
@@ -74,7 +92,8 @@ function resolveDohList(provider, customDoh) {
   if (provider === "custom") {
     if (customDoh && /^https:\/\//i.test(customDoh.trim())) list.push(customDoh.trim());
   } else if (provider && DNS_PROVIDERS[provider] && DNS_PROVIDERS[provider].doh) {
-    list.push(DNS_PROVIDERS[provider].doh);
+    // Gateway 等带 {sub} 模板的服务商在此实例化为随机子域，避免返回未替换的模板
+    list.push(materializeDoh(DNS_PROVIDERS[provider]));
   }
   return list; // 非空表示浏览器直连模式（前端不调用此函数解析）
 }
@@ -200,6 +219,77 @@ function json(body, status = 200, headers = {}) {
   });
 }
 
+// 域名列表缓存 TTL（毫秒）。cf_domains.txt 由 Actions 每天更新一次，缓存 120 秒对时效性
+// 无影响，但能大幅减少对 raw.githubusercontent.com 的请求压力（频繁请求有被限流的风险）。
+const DOMAINS_CACHE_TTL = 120 * 1000;
+
+// 读取域名列表（带 120 秒缓存）。用 Cache API 而非模块级变量，这样才能在同一 PoP 内
+// 跨请求命中。缓存不可用时自动降级为「每次回源」，不影响功能。
+async function fetchDomainsCached(rawUrl) {
+  const cacheKey = "https://domains.cache.local/" + encodeURIComponent(rawUrl);
+  let cache = null;
+  try {
+    cache = await caches.open("cf-probe-domains");
+    const hit = await cache.match(cacheKey);
+    if (hit) {
+      const data = await hit.json();
+      if (data && Date.now() - (data.__cachedAt || 0) < DOMAINS_CACHE_TTL) {
+        return { data, cached: true };
+      }
+    }
+  } catch (e) {
+    cache = null; // Cache API 不可用则降级为不缓存
+  }
+
+  // 回源：加时间戳绕过 raw.githubusercontent.com 的 CDN 缓存，确保拿到最新内容
+  const nocacheUrl = rawUrl + "?t=" + Date.now();
+  let res;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    res = await fetch(nocacheUrl, { cf: { cacheTtl: 0 }, signal: ctrl.signal });
+    clearTimeout(t);
+  } catch (e) {
+    const err = new Error("读取域名列表超时，请重试");
+    err.status = 504;
+    throw err;
+  }
+  if (!res.ok) {
+    const err = new Error("无法读取域名列表");
+    err.status = 502;
+    throw err;
+  }
+
+  const text = await res.text();
+  const lines = text.split(/\r?\n/).map((l) => l.trim());
+  // 解析头部更新时间（如：# 更新时间：北京时间 2026-08-25 12:14:05 / 世界时间(UTC) ...）
+  let updatedAt = "";
+  for (const l of lines) {
+    if (l.startsWith("# 更新时间：")) {
+      updatedAt = l.slice("# 更新时间：".length).trim();
+      break;
+    }
+  }
+  const domains = lines
+    .filter((l) => l && !l.startsWith("#"))
+    .map((l) => l.split("#")[0].trim().toLowerCase());
+  const data = { domains, updatedAt, __cachedAt: Date.now() };
+
+  if (cache) {
+    try {
+      await cache.put(
+        cacheKey,
+        new Response(JSON.stringify(data), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+        })
+      );
+    } catch (e) {
+      // 写缓存失败不影响本次响应
+    }
+  }
+  return { data, cached: false };
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -230,38 +320,16 @@ export default {
       // 优先用 wrangler.toml 的 [vars] RAW_DOMAINS_URL（fork 后可自动改成自己的仓库），
       // 未配置时回退到默认值（上游仓库）。
       const RAW_DOMAINS_URL = (env && env.RAW_DOMAINS_URL) || DEFAULT_RAW_DOMAINS_URL;
-      // 加时间戳绕过 raw.githubusercontent.com CDN 缓存，确保实时
-      const nocacheUrl = RAW_DOMAINS_URL + "?t=" + Date.now();
-      let res;
       try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 10000);
-        res = await fetch(nocacheUrl, { cf: { cacheTtl: 0 }, signal: ctrl.signal });
-        clearTimeout(t);
+        const { data, cached } = await fetchDomainsCached(RAW_DOMAINS_URL);
+        return json(
+          { count: data.domains.length, domains: data.domains, updatedAt: data.updatedAt, cached },
+          200,
+          { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" }
+        );
       } catch (e) {
-        return json({ error: "读取域名列表超时，请重试", detail: String(e.message || e) }, 504);
+        return json({ error: String(e.message || e) }, e.status || 502);
       }
-      if (!res.ok) {
-        return json({ error: "无法读取域名列表", status: res.status }, 502);
-      }
-      const text = await res.text();
-      const lines = text.split(/\r?\n/).map((l) => l.trim());
-      // 解析头部更新时间（如：# 更新时间：北京时间 2026-08-25 12:14:05 / 世界时间(UTC) 2026-08-25 04:14:05）
-      let updatedAt = "";
-      for (const l of lines) {
-        if (l.startsWith("# 更新时间：")) {
-          updatedAt = l.slice("# 更新时间：".length).trim();
-          break;
-        }
-      }
-      const domains = lines
-        .filter((l) => l && !l.startsWith("#"))
-        .map((l) => l.split("#")[0].trim().toLowerCase());
-      return json(
-        { count: domains.length, domains, updatedAt },
-        200,
-        { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" }
-      );
     }
 
     if (path === "/api/resolve") {

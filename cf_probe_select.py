@@ -6,6 +6,7 @@ import os
 import random
 import re
 import socket
+import string
 import subprocess
 import sys
 import threading
@@ -19,6 +20,50 @@ from urllib.parse import unquote, urljoin, urlparse
 from bs4 import XMLParsedAsHTMLWarning
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+# ==================== 0. 可调参数配置区（改这里即可，无需翻找代码） ====================
+# 下面所有参数集中在此，调整探测行为请直接修改本区域，代码其他位置不再出现魔法数字。
+
+# ---- 输出与种子 ----
+OUTPUT_FILE = "cf_domains.txt"          # 探测结果落盘文件名
+BOOTSTRAP_SEEDS = ["cloudflare.com"]    # 历史为空时的自举种子
+
+# ---- 数量与配额 ----
+SEED_SAMPLE_SIZE = 5                    # 每轮从已有域名中随机抽取的种子数量
+MAX_SUBDOMAINS_PER_ROOT = 3             # 同一主域名最多保留的子域数量
+MAX_NEW_PER_RUN = 200                   # 单轮最多新增的域名数（达到即提前结束）
+TOTAL_CAP = 200                         # 落盘域名总量硬上限
+                                        #   超限处理：先把主域配额从 3 收紧到 2、再到 1；
+                                        #   若仍超限，则按「GitHub 机房 → CF 节点」延迟升序截断（不可达沉底）
+
+# ---- 时间与批次 ----
+PROBE_TIME_LIMIT = 600                  # 单轮探测时长上限（秒）
+MAX_NEW_PER_PAGE = 50                   # 单个页面最多提取的外链域名数
+BATCH_SIZE = 20                         # 每轮出队处理的域名数
+
+# ---- 并发线程数 ----
+WORKERS_PROBE = 10                      # 主探测（检测 + 外链扩散）并发数
+WORKERS_VERIFY = 10                     # 落盘前 CF 多源校验并发数
+WORKERS_LATENCY = 10                    # Actions 内部延迟测速并发数
+
+# ---- 网络超时（秒） ----
+LATENCY_TIMEOUT = 3                     # Actions 内部测速单域名超时
+HTTP_TIMEOUT_EXPAND = 6                 # 抓取页面提取外链的超时
+DNS_TIMEOUT_UDP = 5                     # UDP DNS 解析超时
+DNS_TIMEOUT_DOH = 5                     # DoH 解析超时
+CF_RANGES_TIMEOUT = 10                  # 拉取 Cloudflare 官方 IP 段的超时
+
+# ---- Cloudflare Gateway DoH 随机子域 ----
+# Gateway 的 DoH 端点接受任意子域（作为匿名 location），固定地址长期暴露易被针对性限速，
+# 故每次运行时随机生成一个 10 位「小写字母 + 数字」子域，让每次请求的 endpoint 都不同。
+GATEWAY_SUB_LEN = 10
+
+
+def random_gateway_sub(n: int = GATEWAY_SUB_LEN) -> str:
+    """生成 n 位「小写字母 + 数字」随机串，用作 Cloudflare Gateway DoH 的随机子域。"""
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(random.choice(alphabet) for _ in range(n))
+
 
 # ==================== 1. 自动检测并安装依赖库 ====================
 REQUIRED_PACKAGES = {
@@ -113,7 +158,7 @@ HTTP_SESSION.headers.update(HEADERS)
 DOMAIN_IP_CACHE = {}
 
 
-def load_cf_ip_ranges(timeout: int = 10):
+def load_cf_ip_ranges(timeout: int = CF_RANGES_TIMEOUT):
     """从 Cloudflare 官网拉取最新 IPv4 CIDR 段，失败则返回兜底列表。"""
     url = "https://www.cloudflare.com/ips-v4"
     try:
@@ -194,16 +239,6 @@ BIG_TECH_ROOTS = {
     "ibm.com", "adobe.com", "akamai.com", "akamaized.net", "fastly.net",
     "cloudfront.cn",
 }
-
-OUTPUT_FILE = "cf_domains.txt"
-BOOTSTRAP_SEEDS = ["cloudflare.com"]
-SEED_SAMPLE_SIZE = 5
-MAX_SUBDOMAINS_PER_ROOT = 3
-MAX_NEW_PER_RUN = 200
-PROBE_TIME_LIMIT = 600
-MAX_NEW_PER_PAGE = 50
-TOTAL_CAP = 400          # 落盘域名总量硬上限
-LATENCY_TIMEOUT = 3      # Actions 内部测速单域名超时（秒）
 
 IGNORE_EXTENSIONS = (
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".css", ".js",
@@ -327,7 +362,7 @@ def _parse_dns_a_records(resp: bytes) -> list:
         return []
 
 
-def resolve_via_udp_dns(domain: str, server: str, timeout: int = 5) -> list:
+def resolve_via_udp_dns(domain: str, server: str, timeout: int = DNS_TIMEOUT_UDP) -> list:
     try:
         query = _build_dns_query(domain)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -339,7 +374,7 @@ def resolve_via_udp_dns(domain: str, server: str, timeout: int = 5) -> list:
         return []
 
 
-def resolve_via_doh(domain: str, base_url: str, timeout: int = 5) -> list:
+def resolve_via_doh(domain: str, base_url: str, timeout: int = DNS_TIMEOUT_DOH) -> list:
     try:
         url = base_url + "?name=" + domain + "&type=1"
         r = HTTP_SESSION.get(url, headers={"Accept": "application/dns-json"}, timeout=timeout)
@@ -360,12 +395,14 @@ def resolve_via_doh(domain: str, base_url: str, timeout: int = 5) -> list:
 # 与网页侧可信 DoH 对齐；移除在 Actions 网络下不稳定的 volcengine / 360 / cloudflare-dns.com。
 # 注：脚本跑在 GitHub Actions 服务端（无浏览器、无 CORS 限制），故腾讯 doh.pub 可用。
 # Cloudflare Gateway 地址与网页侧一致；fork 后若无法访问可自行替换为自己的 Gateway。
+# 注意：cf-gateway-doh 的子域在每次运行时随机生成（见配置区 random_gateway_sub），
+# 避免固定 endpoint 被针对性限速。若该随机子域不可用，宽松校验逻辑会忽略此源，不影响结果。
 DNS_RESOLVERS = [
     ("system", "udp", None),
     ("tencent-doh", "doh", "https://doh.pub/dns-query"),
     ("aliyun-doh", "doh", "https://dns.alidns.com/resolve"),
     ("dnssb-doh", "doh", "https://doh.dns.sb/dns-query"),
-    ("cf-gateway-doh", "doh", "https://1234567890qwertyuiop.cloudflare-gateway.com/dns-query"),
+    ("cf-gateway-doh", "doh", "https://" + random_gateway_sub() + ".cloudflare-gateway.com/dns-query"),
     ("google-doh", "doh", "https://dns.google/resolve"),
 ]
 
@@ -441,7 +478,7 @@ def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
         return (domain, True, ",".join(union))
 
     removed = []
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=WORKERS_VERIFY) as pool:
         for domain, ok, detail in pool.map(check, domains):
             if ok:
                 print(f"    [✓] {domain:<45} {detail}")
@@ -492,7 +529,7 @@ def _trim_by_latency(saved: set, root_sub_count: defaultdict, cap: int) -> int:
             return d, None
 
     lats = {}
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=WORKERS_LATENCY) as pool:
         for d, lt in pool.map(_one, domains):
             lats[d] = lt if lt is not None else float("inf")
     ordered = sorted(domains, key=lambda d: (lats[d], d))
@@ -675,13 +712,13 @@ def run_cf_explorer():
             print(" -> [非 Cloudflare 仅扩散外链]")
             _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
 
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=WORKERS_PROBE) as pool:
         while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
             if time.time() - start_time >= PROBE_TIME_LIMIT:
                 print(f"\n[*] 已达探测时长上限 {PROBE_TIME_LIMIT}s，停止探测，进入收尾...")
                 break
 
-            batch = next_batch(20)
+            batch = next_batch(BATCH_SIZE)
             if not batch:
                 break
 
@@ -700,7 +737,7 @@ def _expand(current, enqueue, visited, non_cf_roots, priority: bool = False, loc
     for schema in ("https://", "http://"):
         try:
             target_url = f"{schema}{current}"
-            response = HTTP_SESSION.get(target_url, timeout=6)
+            response = HTTP_SESSION.get(target_url, timeout=HTTP_TIMEOUT_EXPAND)
             if response.text and len(response.text) > 100:
                 new_domains = extract_all_domains_deep(response.text, target_url)
                 added = 0

@@ -1,6 +1,6 @@
 // 前端页面模块：返回完整的 HTML 页面字符串（含内联前端脚本）
 // DNS 服务商列表从 worker.js 导入（全仓库唯一来源，避免多处维护不一致）
-import { DNS_PROVIDER_LIST } from "./worker.js";
+import { DNS_PROVIDER_LIST, materializeDoh } from "./worker.js";
 
 // 生成 DNS 服务商下拉选项（按数组顺序）
 function providerOptions() {
@@ -14,6 +14,11 @@ const FRONTEND_JS = `
 const TIMEOUT = 4000;       // 单域名测速超时
 const RENDER_EVERY = 5;     // 每完成 5 个刷新一次列表
 const MAX_IPS = 3;          // 单域名最多展示的解析 IP 数（展示全部解析结果，封顶 3 个）
+// 两阶段测速：先全量粗筛（1 轮）快速出全貌，再对延迟最低的 Top N 精测（3 轮）取平均。
+// 这样用户一两分钟就能看到完整排序，不用等 400 个域名各测 3 轮（光轮间等待就 20 多分钟）。
+const COARSE_ROUNDS = 1;    // 粗筛阶段每个域名的测速轮数
+const FINE_ROUNDS = 3;      // 精测阶段每个域名的测速轮数
+const ROUND_GAP = 2000;     // 测速轮与轮之间的间隔（毫秒）
 let domains = [];
 let ipMap = {};             // domain -> [{ip, isCf}]
 let stateMap = {};          // domain -> {phase,lat,status,rounds,okRounds,avg}
@@ -23,6 +28,9 @@ let testing = false;
 let stopRequested = false;  // 停止测速标志
 let resolvedCount = 0;      // 解析完成计数
 let measuredCount = 0;      // 测速完成计数
+let filterText = "";        // 域名关键字筛选
+let onlyCf = false;         // 仅显示判定为 CF 的域名
+let onlyOk = false;         // 仅显示测速可达的域名
 
 const $ = (id) => document.getElementById(id);
 const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "状态", score: "综合" };
@@ -49,6 +57,11 @@ function loadMeasureThreads() {
 }
 function saveResolveThreads(n) { localStorage.setItem("cf_rthreads", String(n)); }
 function saveMeasureThreads(n) { localStorage.setItem("cf_mthreads", String(n)); }
+// 精测数量：粗筛后只对延迟最低的这 N 个域名做多轮精测（默认 50）
+function loadFineCount() {
+  return Math.max(1, parseInt(localStorage.getItem("cf_fcount") || "50", 10) || 50);
+}
+function saveFineCount(n) { localStorage.setItem("cf_fcount", String(n)); }
 
 function setInfo(msg) { $("info").textContent = msg; }
 
@@ -132,19 +145,63 @@ async function browserDohResolve(doh, domain, maxAttempts = 3) {
 
 // IP -> 是否 CF 的浏览器端缓存（去重，减少 /api/cf-check 调用）
 const CF_CACHE = {};
+
+// CF 判定攒批：解析是并发的，若每个域名各自发一次 /api/cf-check，400 个域名就是 400 次请求。
+// 这里把待判定 IP 攒到 CF_BATCH_SIZE 个再统一发一次（后端单次最多支持 100 个 IP），
+// 请求数降到约 400/30 ≈ 14 次。CF_FLUSH_DELAY 是不足一批时的超时兜底，避免尾部 IP 一直等待。
+const CF_BATCH_SIZE = 30;
+const CF_FLUSH_DELAY = 500;
+let cfPending = [];     // 待判定 IP
+let cfWaiters = [];     // 等待本批结果的 resolve 回调
+let cfFlushing = false; // 是否正在请求中（防止并发 flush）
+let cfTimer = null;     // 超时兜底计时器
+
+async function flushCf() {
+  if (cfFlushing || !cfPending.length) return;
+  cfFlushing = true;
+  // 取快照：flush 期间新加入的 IP 归入下一批，避免本批无限增长
+  const waiters = cfWaiters.slice();
+  const batch = cfPending.slice();
+  cfWaiters = [];
+  cfPending = [];
+  const uniq = [...new Set(batch)];
+  try {
+    const r = await fetch("/api/cf-check?ips=" + encodeURIComponent(uniq.join(",")), { cache: "no-store" });
+    const data = await r.json();
+    for (const ip of uniq) CF_CACHE[ip] = !!(data.cf && data.cf[ip]);
+  } catch (e) {
+    for (const ip of uniq) CF_CACHE[ip] = false;
+  }
+  cfFlushing = false;
+  // 唤醒本批所有等待者
+  for (const w of waiters) w();
+  // flush 期间又攒了新 IP 则继续处理
+  if (cfPending.length) flushCf();
+}
+
+// 不足一批时的兜底：延迟一小段时间强制 flush，防止尾部几个 IP 永远等不到满批
+function scheduleCfFlush() {
+  if (cfTimer) return;
+  cfTimer = setTimeout(() => {
+    cfTimer = null;
+    flushCf();
+  }, CF_FLUSH_DELAY);
+}
+
 async function markCf(ips) {
   if (!ips.length) return [];
-  const uniq = [...new Set(ips)];
-  const need = uniq.filter((ip) => !(ip in CF_CACHE));
-  if (need.length) {
-    try {
-      const r = await fetch("/api/cf-check?ips=" + encodeURIComponent(need.join(",")), { cache: "no-store" });
-      const data = await r.json();
-      for (const ip of need) CF_CACHE[ip] = !!(data.cf && data.cf[ip]);
-    } catch (e) {
-      for (const ip of need) CF_CACHE[ip] = false;
-    }
+  const need = [...new Set(ips)].filter((ip) => !(ip in CF_CACHE));
+  // 全部命中缓存则直接返回
+  if (!need.length) return ips.map((ip) => ({ ip, isCf: CF_CACHE[ip] }));
+
+  cfPending.push(...need);
+  const done = new Promise((resolve) => cfWaiters.push(resolve));
+  if (cfPending.length >= CF_BATCH_SIZE) {
+    flushCf(); // 不 await，让请求在后台进行，其余解析继续入队
+  } else {
+    scheduleCfFlush();
   }
+  await done;
   return ips.map((ip) => ({ ip, isCf: CF_CACHE[ip] }));
 }
 
@@ -153,6 +210,23 @@ function getDohUrl(provider, customDoh) {
   if (provider === "local") return null;
   if (provider === "custom") return (customDoh || "").trim();
   return (DOh_URLS[provider]) || null;
+}
+
+// 生成 n 位「小写字母 + 数字」随机串（用于 Cloudflare Gateway 随机子域）
+function randomSub(n) {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let s = "";
+  for (let i = 0; i < n; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+  return s;
+}
+
+// 轮换 Gateway 随机子域：预检失败时换一个 endpoint 重试，并把新地址写回 DOh_URLS，
+// 保证后续解析与预检用的是同一个串。无模板（未配置 Gateway）时返回 null。
+function rotateGatewayUrl() {
+  if (!GATEWAY_DOH_TEMPLATE) return null;
+  const url = GATEWAY_DOH_TEMPLATE.replace("{sub}", randomSub(10));
+  DOh_URLS.cf_gateway = url;
+  return url;
 }
 
 // 解析单个域名（带缓存），更新解析进度
@@ -183,12 +257,14 @@ async function resolveOne(d) {
   return list;
 }
 
-// 测速单个域名（域名 HTTPS 实测 3 轮）
-async function measureOne(d) {
-  const rounds = [];
+// 测速单个域名（域名 HTTPS 实测，rounds 控制轮数）
+//   rounds=COARSE_ROUNDS(1) 用于粗筛：全量快速过一遍，得到初步排名
+//   rounds=FINE_ROUNDS(3)   用于精测：仅对粗筛 Top N，多轮取平均更稳
+async function measureOne(d, rounds = FINE_ROUNDS) {
+  const list = [];
   let ok = 0;
-  for (let i = 0; i < 3; i++) {
-    if (i > 0) await new Promise((r) => setTimeout(r, 2000));
+  for (let i = 0; i < rounds; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, ROUND_GAP));
     const t0 = performance.now();
     try {
       const ctrl = new AbortController();
@@ -196,14 +272,27 @@ async function measureOne(d) {
       const r = await fetch("https://" + d, { method: "HEAD", mode: "no-cors", signal: ctrl.signal });
       clearTimeout(to);
       const ms = Math.round(performance.now() - t0);
-      rounds.push(ms); ok++;
+      list.push(ms); ok++;
     } catch (e) {
-      rounds.push(e.name === "AbortError" ? "T" : "E");
+      list.push(e.name === "AbortError" ? "T" : "E");
     }
   }
-  const nums = rounds.filter((x) => typeof x === "number");
+  const nums = list.filter((x) => typeof x === "number");
   const avg = nums.length ? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length) : null;
-  return { rounds, okRounds: ok, avg };
+  return { rounds: list, okRounds: ok, avg, total: rounds };
+}
+
+// 把一次测速结果写回 stateMap（粗筛与精测共用同一套判定）
+function applyMeasure(d, r) {
+  const s = stateMap[d];
+  s.rounds = r.rounds;
+  s.okRounds = r.okRounds;
+  s.totalRounds = r.total;   // 本次实际轮数，排序算成功率时按它归一化
+  s.avg = r.avg;
+  s.lat = r.avg;
+  if (r.okRounds === 0) s.status = "err";
+  else if (r.avg === null) s.status = "timeout";
+  else s.status = "ok";
 }
 
 // 并发池（支持停止：stopRequested 为 true 时中止剩余任务）
@@ -235,23 +324,43 @@ async function preflightCheck() {
   }
   if (!doh) { alert("未知 DNS 服务商"); return false; }
 
-  try {
-    const ips = await browserDohResolve(doh, "cloudflare.com");
-    if (!ips.length) {
-      alert("该 DoH 无法解析出 IP（可能地址不正确、网络被拦截，或浏览器 CORS 限制）：\\n" + doh + "\\n请更换其他 DNS 服务商或检查网络");
-      return false;
+  // 随机子域类服务商（Cloudflare Gateway）：当前子域不可用时自动换一个重试一次，
+  // 避免偶发随机到不可用子域就导致整个功能不可用。
+  const canRotate = !!GATEWAY_DOH_TEMPLATE && doh.indexOf(".cloudflare-gateway.com") >= 0;
+  const maxAttempt = canRotate ? 2 : 1;
+
+  let lastDoh = doh;
+  let lastErr = null;
+  let noIps = false;
+
+  for (let attempt = 1; attempt <= maxAttempt; attempt++) {
+    // 第二次尝试时换成新的随机子域
+    if (attempt > 1) lastDoh = rotateGatewayUrl() || lastDoh;
+    try {
+      const ips = await browserDohResolve(lastDoh, "cloudflare.com");
+      if (ips.length) return true;
+      noIps = true;
+    } catch (e) {
+      lastErr = e;
     }
-    return true;
-  } catch (e) {
-    let extra = "";
-    if (provider === "custom") {
-      extra = "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + doh + " 并点「继续」）";
-    } else {
-      extra = "\\n提示：该公开 DoH 可能不返回 CORS 头（浏览器直连会被拦截）或当前网络不可达。可尝试「阿里 DoH（国内）」「本地」或自定义 DoH；国际 DoH 需可访问境外网络。";
-    }
-    alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\\n" + doh + "\\n错误：" + e.message + extra);
+  }
+
+  if (noIps) {
+    alert("该 DoH 无法解析出 IP（可能地址不正确、网络被拦截，或浏览器 CORS 限制）：\\n" + lastDoh +
+      "\\n请更换其他 DNS 服务商或检查网络" + (canRotate ? "（已自动换过一次随机子域仍失败）" : ""));
     return false;
   }
+
+  let extra = "";
+  if (provider === "custom") {
+    extra = "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + lastDoh + " 并点「继续」）";
+  } else {
+    extra = "\\n提示：该公开 DoH 可能不返回 CORS 头（浏览器直连会被拦截）或当前网络不可达。可尝试「阿里 DoH（国内）」「本地」或自定义 DoH；国际 DoH 需可访问境外网络。";
+  }
+  alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\\n" + lastDoh +
+    "\\n错误：" + (lastErr ? lastErr.message : "未知") + extra +
+    (canRotate ? "（已自动换过一次随机子域仍失败）" : ""));
+  return false;
 }
 
 async function startTest() {
@@ -288,11 +397,14 @@ async function startTest() {
     }
   });
   await runPool(resolveTasks, rThreads);
+  // 兜底：强制 flush 尾部不足一批的待判定 IP
+  await flushCf();
   if (stopRequested) { finishTest("已停止（解析阶段）"); return; }
 
-  // 阶段二：统一测速
-  setInfo("测速中…");
-  const measureTasks = domains.map((d) => async () => {
+  // 阶段二（粗筛）：全量每个域名测 1 轮，快速得到完整排序，用户一两分钟就能看到全貌
+  setInfo("粗筛中…");
+  measuredCount = 0;
+  const coarseTasks = domains.map((d) => async () => {
     if (stopRequested) return;
     // 无 IP 的域名直接跳过测速，避免无意义请求并显示"解析失败"
     if (!ipMap[d] || !ipMap[d].length) {
@@ -300,35 +412,67 @@ async function startTest() {
       stateMap[d].status = "err";
       measuredCount++;
       if (measuredCount % RENDER_EVERY === 0 || measuredCount === domains.length) {
-        setInfo("解析 " + resolvedCount + "/" + domains.length + " · 测速 " + measuredCount + "/" + domains.length);
+        setInfo("粗筛 " + measuredCount + "/" + domains.length);
         render();
       }
       return;
     }
     stateMap[d].phase = "measuring";
     stateMap[d].status = "measuring";
+    stateMap[d].stage = "coarse";
     try {
-      const r = await measureOne(d);
-      stateMap[d].rounds = r.rounds;
-      stateMap[d].okRounds = r.okRounds;
-      stateMap[d].avg = r.avg;
-      stateMap[d].lat = r.avg;
-      if (r.okRounds === 0) stateMap[d].status = "err";
-      else if (r.avg === null) stateMap[d].status = "timeout";
-      else stateMap[d].status = "ok";
+      applyMeasure(d, await measureOne(d, COARSE_ROUNDS));
     } catch (e) {
       stateMap[d].status = "err";
     }
     stateMap[d].phase = "done";
     measuredCount++;
     if (measuredCount % RENDER_EVERY === 0 || measuredCount === domains.length) {
-      setInfo("解析 " + domains.length + "/" + domains.length + " · 测速 " + measuredCount + "/" + domains.length);
+      setInfo("粗筛 " + measuredCount + "/" + domains.length);
       render();
     }
   });
-  await runPool(measureTasks, mThreads);
+  await runPool(coarseTasks, mThreads);
+  if (stopRequested) { finishTest("已停止（粗筛阶段）"); return; }
 
-  finishTest("解析 " + domains.length + "/" + domains.length + " · 测速 " + domains.length + "/" + domains.length + " · 完成");
+  // 阶段三（精测）：只对粗筛里「可达且延迟最低」的 Top N 做 3 轮精测。
+  // 精测耗时是粗筛的数倍，只对头部候选做，兼顾精度与总耗时。
+  const fineCount = loadFineCount();
+  const candidates = domains
+    .filter((d) => stateMap[d] && stateMap[d].status === "ok" && stateMap[d].avg != null)
+    .sort((a, b) => stateMap[a].avg - stateMap[b].avg)
+    .slice(0, fineCount);
+
+  if (!candidates.length) {
+    finishTest("粗筛 " + domains.length + "/" + domains.length + " · 无可达域名，跳过精测");
+    return;
+  }
+
+  setInfo("精测中…");
+  let fineDone = 0;
+  const fineTasks = candidates.map((d) => async () => {
+    if (stopRequested) return;
+    stateMap[d].phase = "measuring";
+    stateMap[d].status = "measuring";
+    stateMap[d].stage = "fine";
+    try {
+      applyMeasure(d, await measureOne(d, FINE_ROUNDS));
+    } catch (e) {
+      stateMap[d].status = "err";
+    }
+    stateMap[d].phase = "done";
+    fineDone++;
+    if (fineDone % RENDER_EVERY === 0 || fineDone === candidates.length) {
+      setInfo("粗筛 " + domains.length + "/" + domains.length + " · 精测 " + fineDone + "/" + candidates.length);
+      render();
+    }
+  });
+  await runPool(fineTasks, mThreads);
+
+  finishTest(
+    "粗筛 " + domains.length + "/" + domains.length +
+    " · 精测 " + fineDone + "/" + candidates.length + " · 完成"
+  );
 }
 
 function finishTest(infoMsg) {
@@ -347,7 +491,8 @@ function stopTest() {
 }
 
 function copyAll() {
-  const lines = sortRows().map((d) => d + (stateMap[d].avg != null ? "  # " + stateMap[d].avg + "ms" : ""));
+  // 复制「当前可见」的行（已应用筛选），做到所见即所得
+  const lines = sortRows().filter(passFilter).map((d) => d + (stateMap[d].avg != null ? "  # " + stateMap[d].avg + "ms" : ""));
   navigator.clipboard.writeText(lines.join("\\n")).then(() => {
     const old = $("copyAll").textContent;
     $("copyAll").textContent = "已复制";
@@ -380,7 +525,9 @@ function latHtml(d) {
   }).join(" / ");
   const avgCls = s.status === "ok" ? "ok" : s.status === "timeout" ? "timeout" : "err";
   const avgStr = s.avg != null ? '<span class="lat ' + avgCls + '">均 ' + s.avg + "ms</span>" : "";
-  return '<span class="rounds">' + roundStr + "</span>" + avgStr;
+  // 阶段提示用 title，鼠标悬停可见，不额外占用行高
+  const stageTitle = s.stage === "coarse" ? "粗筛 1 轮" : s.stage === "fine" ? "精测 " + FINE_ROUNDS + " 轮" : "";
+  return '<span class="rounds" title="' + stageTitle + '">' + roundStr + "</span>" + avgStr;
 }
 function statusHtml(d) {
   const s = stateMap[d];
@@ -399,6 +546,29 @@ function cfHtml(d) {
   return '<span class="cf-no">✗ 非CF</span>';
 }
 
+// 测速阶段权重：精测（多轮、数据更可信）优先于粗筛（单轮）。
+// 若只比成功率，粗筛「1 轮偶然成功」= 1.0 会盖过精测「3 轮中 2 轮成功」≈ 0.67，
+// 但后者样本更多、结论更可靠，所以先按阶段分组，再比成功率与延迟。
+function stageRank(s) {
+  if (!s) return 2;
+  if (s.stage === "fine") return 0;
+  if (s.stage === "coarse") return 1;
+  return 2;
+}
+
+// 两个「已有测速结果」的域名之间的比较（lat / score 两种排序共用）
+function compareMeasured(sa, sb) {
+  const ra = stageRank(sa), rb = stageRank(sb);
+  if (ra !== rb) return ra - rb;
+  // 成功率按各自实际轮数归一化，兼容粗筛 1 轮与精测 3 轮
+  const fa = sa.okRounds / (sa.totalRounds || 3);
+  const fb = sb.okRounds / (sb.totalRounds || 3);
+  if (fb !== fa) return fb - fa;
+  const la = sa.avg == null ? Infinity : sa.avg;
+  const lb = sb.avg == null ? Infinity : sb.avg;
+  return la - lb;
+}
+
 function sortRows() {
   const arr = domains.slice();
   if (sortMode === "domain") arr.sort((a, b) => a.localeCompare(b));
@@ -409,32 +579,13 @@ function sortRows() {
     return vb - va;
   });
   else if (sortMode === "status") arr.sort((a, b) => ((stateMap[a] && stateMap[a].status) || "").localeCompare((stateMap[b] && stateMap[b].status) || ""));
-  else if (sortMode === "lat") {
+  } else { // lat / score：两者口径一致，均按「阶段 → 成功率 → 平均延迟」排序
     arr.sort((a, b) => {
       const sa = stateMap[a], sb = stateMap[b];
       const ha = sa && sa.rounds, hb = sb && sb.rounds;
-      if (ha && hb) {
-        const fa = sa.okRounds / 3, fb = sb.okRounds / 3;
-        if (fb !== fa) return fb - fa;
-        const la = sa.avg == null ? Infinity : sa.avg;
-        const lb = sb.avg == null ? Infinity : sb.avg;
-        return la - lb;
-      }
-      if (ha) return -1; if (hb) return 1;
-      return (orderIndex[a] || 0) - (orderIndex[b] || 0);
-    });
-  } else { // score
-    arr.sort((a, b) => {
-      const sa = stateMap[a], sb = stateMap[b];
-      const ha = sa && sa.rounds, hb = sb && sb.rounds;
-      if (ha && hb) {
-        const fa = sa.okRounds / 3, fb = sb.okRounds / 3;
-        if (fb !== fa) return fb - fa;
-        const la = sa.avg == null ? Infinity : sa.avg;
-        const lb = sb.avg == null ? Infinity : sb.avg;
-        return la - lb;
-      }
-      if (ha) return -1; if (hb) return 1;
+      if (ha && hb) return compareMeasured(sa, sb);
+      if (ha) return -1;
+      if (hb) return 1;
       return (orderIndex[a] || 0) - (orderIndex[b] || 0);
     });
   }
@@ -448,6 +599,31 @@ function esc(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// 筛选判定：域名是否通过当前的搜索/开关条件。
+// 注意：筛选只影响表格显示，不影响上方指标卡的统计（指标卡始终反映全量测速状态）。
+function passFilter(d) {
+  if (filterText) {
+    const kw = filterText.trim().toLowerCase();
+    if (kw && d.indexOf(kw) < 0) return false;
+  }
+  if (onlyCf) {
+    const list = ipMap[d];
+    // 「仅 CF 节点」= 该域名解析出的所有 IP 都命中 Cloudflare 网段（对应 ✓CF）
+    if (!list || !list.length || !list.every((x) => x.isCf)) return false;
+  }
+  if (onlyOk) {
+    const s = stateMap[d];
+    if (!s || s.status !== "ok") return false;
+  }
+  return true;
+}
+
+function updateFilterInfo(shown, total) {
+  const el = $("filterInfo");
+  if (!el) return;
+  el.textContent = shown === total ? "" : "筛选出 " + shown + " / " + total + " 个";
 }
 
 function updateStats() {
@@ -473,17 +649,27 @@ function updateStats() {
 }
 
 function render() {
-  const rows = sortRows();
-  const best = rows.find((d) => stateMap[d] && stateMap[d].status === "ok" && stateMap[d].avg != null);
+  const all = sortRows();                       // 全量排序结果（排名与最优基于此）
+  const rows = all.filter(passFilter);          // 筛选后仅影响表格显示
+  const best = all.find((d) => stateMap[d] && stateMap[d].status === "ok" && stateMap[d].avg != null);
+  // 全局排名映射：即使筛选后也显示真实名次，而不是筛选结果的相对序号
+  const rankOf = {};
+  all.forEach((d, idx) => { rankOf[d] = idx + 1; });
   const tbody = $("tbody");
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无数据</td></tr>'; return; }
+  updateFilterInfo(rows.length, all.length);
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">' +
+      (all.length ? "没有符合筛选条件的域名" : "暂无数据") + "</td></tr>";
+    updateStats();
+    return;
+  }
   let html = "";
-  rows.forEach((d, i) => {
+  rows.forEach((d) => {
     const cls = [];
     if ((ipMap[d] || []).length && !(ipMap[d] || []).every((x) => x.isCf)) cls.push("warn-row");
     const bestCls = d === best ? "best" : "";
     html += '<tr class="row ' + cls.join(" ") + '" data-d="' + esc(d) + '">';
-    html += '<td class="rank">' + (bestCls ? "★" : i + 1) + "</td>";
+    html += '<td class="rank">' + (bestCls ? "★" : rankOf[d]) + "</td>";
     html += '<td><a class="domain-link" href="https://' + esc(d) + '" target="_blank" rel="noopener noreferrer">' + esc(d) + "</a></td>";
     html += "<td>" + ipHtml(d) + "</td>";
     html += "<td>" + cfHtml(d) + "</td>";
@@ -503,6 +689,7 @@ function initControls() {
   $("customDoh").value = cd;
   $("resolveThreads").value = loadResolveThreads();
   $("measureThreads").value = loadMeasureThreads();
+  $("fineCount").value = loadFineCount();
   updateCustomUI();
 }
 function updateCustomUI() {
@@ -524,6 +711,10 @@ $("provider").addEventListener("change", (e) => { saveProvider(e.target.value); 
 $("customDoh").addEventListener("input", (e) => { saveCustomDoh(e.target.value); updateCustomUI(); });
 $("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parseInt(e.target.value, 10) || 16); });
 $("measureThreads").addEventListener("change", (e) => { saveMeasureThreads(parseInt(e.target.value, 10) || 10); });
+$("fineCount").addEventListener("change", (e) => { saveFineCount(parseInt(e.target.value, 10) || 50); });
+$("search").addEventListener("input", (e) => { filterText = e.target.value; render(); });
+$("onlyCf").addEventListener("change", (e) => { onlyCf = e.target.checked; render(); });
+$("onlyOk").addEventListener("change", (e) => { onlyOk = e.target.checked; render(); });
 document.querySelectorAll("th[data-sort]").forEach((th) => {
   th.addEventListener("click", () => { sortMode = th.getAttribute("data-sort"); render(); });
 });
@@ -565,9 +756,18 @@ export function html(version) {
   // 公开 DoH 地址映射（供浏览器客户端直连使用；custom 用用户填写的地址）
   const dohUrls = {};
   DNS_PROVIDER_LIST.forEach((p) => {
-    if (p.doh) dohUrls[p.key] = p.doh;
+    if (!p.doh) return;
+    // 带 {sub} 模板的服务商（Cloudflare Gateway）在每次渲染页面时实例化为随机子域，
+    // 整页共用一个串，保证预检与解析结果一致。
+    dohUrls[p.key] = materializeDoh(p);
   });
-  const frontendJs = "/* FRONTEND_VERSION=" + (version || "") + " */\nconst DOh_URLS = " + JSON.stringify(dohUrls) + ";\n" + FRONTEND_JS;
+  // Gateway 的 DoH 模板（含 {sub} 占位符）一并注入前端，便于预检失败时就地换随机子域重试
+  const gatewayTpl = (DNS_PROVIDER_LIST.find((p) => p.randomSubdomain) || {}).doh || "";
+  const frontendJs =
+    "/* FRONTEND_VERSION=" + (version || "") + " */\n" +
+    "const GATEWAY_DOH_TEMPLATE = " + JSON.stringify(gatewayTpl) + ";\n" +
+    "const DOh_URLS = " + JSON.stringify(dohUrls) + ";\n" +
+    FRONTEND_JS;
   return `<!doctype html>
 <!-- DEPLOY_VERSION=${version || ""} -->
 <html lang="zh-CN">
@@ -618,7 +818,7 @@ export function html(version) {
   }
   .bar label { font-size: 13px; color: var(--fg-muted); display: inline-flex; align-items: center; gap: 6px; }
   #customDohWrap { display: none; }
-  .bar input, .bar select {
+  .bar input, .bar select, .filters input[type=text] {
     background: var(--surface-2);
     color: var(--fg);
     border: 1px solid var(--line);
@@ -627,7 +827,11 @@ export function html(version) {
     font-size: 13px;
     outline: none;
   }
-  .bar input:focus, .bar select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 2px rgba(188,207,228,0.35); }
+  .bar input:focus, .bar select:focus, .filters input[type=text]:focus { border-color: var(--line-strong); box-shadow: 0 0 0 2px rgba(188,207,228,0.35); }
+  .filters { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 12px 24px 0; }
+  .switch { font-size: 13px; color: var(--fg-muted); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+  .switch input { cursor: pointer; accent-color: var(--accent); width: 15px; height: 15px; }
+  .switch:hover { color: var(--fg); }
   .bar input[type=number] { width: 60px; }
   button {
     background: var(--accent);
@@ -716,7 +920,7 @@ export function html(version) {
   <button id="start">开始测速</button>
   <button id="stop" style="display:none">停止</button>
   <button id="refresh" class="ghost">刷新域名</button>
-  <button id="copyAll" class="ghost">复制全部</button>
+  <button id="copyAll" class="ghost">复制当前</button>
   <label>DNS 服务商
     <select id="provider">${options}</select>
   </label>
@@ -729,7 +933,10 @@ export function html(version) {
   <label>测速线程
     <input id="measureThreads" type="number" min="1" max="32" value="10">
   </label>
-  <span class="status" id="info">DNS 解析除「本地」走服务端外，均由你的浏览器直连 DoH；测速对每个域名发 HTTPS 请求测 3 轮（间隔 2 秒）取平均，按综合排序</span>
+  <label title="粗筛后只对延迟最低的前 N 个域名做 3 轮精测">精测数量
+    <input id="fineCount" type="number" min="1" max="400" value="50">
+  </label>
+  <span class="status" id="info">DNS 解析除「本地」走服务端外，均由你的浏览器直连 DoH；测速分两阶段：先全量粗筛 1 轮快速排序，再对延迟最低的「精测数量」个域名测 3 轮（间隔 2 秒）取平均</span>
 </div>
 
 <div class="stats" id="stats">
@@ -738,6 +945,13 @@ export function html(version) {
   <div class="stat"><div class="stat-num" id="stat-measuring">0</div><div class="stat-label">剩余测速</div></div>
   <div class="stat"><div class="stat-num ok" id="stat-ok">0</div><div class="stat-label">可达</div></div>
   <div class="stat"><div class="stat-num err" id="stat-err">0</div><div class="stat-label">失败</div></div>
+</div>
+
+<div class="filters">
+  <input id="search" type="text" placeholder="搜索域名关键字…" size="24">
+  <label class="switch"><input id="onlyCf" type="checkbox"> 仅 CF 节点</label>
+  <label class="switch"><input id="onlyOk" type="checkbox"> 仅可达</label>
+  <span class="status" id="filterInfo"></span>
 </div>
 
 <div class="wrap">
