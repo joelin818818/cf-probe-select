@@ -30,7 +30,7 @@ BOOTSTRAP_SEEDS = ["cloudflare.com"]    # 历史为空时的自举种子
 # ---- 数量与配额 ----
 SEED_SAMPLE_SIZE = 5                    # 每轮从已有域名中随机抽取的种子数量
 MAX_SUBDOMAINS_PER_ROOT = 3             # 同一主域名最多保留的子域数量
-MAX_NEW_PER_RUN = 200                   # 单轮最多新增的域名数（达到即提前结束）
+MAX_NEW_PER_RUN = 100                   # 单轮最多新增的域名数（达到即提前结束）
 TOTAL_CAP = 200                         # 落盘域名总量硬上限
                                         #   超限处理：先把主域配额从 3 收紧到 2、再到 1；
                                         #   若仍超限，则按「GitHub 机房 → CF 节点」延迟升序截断（不可达沉底）
