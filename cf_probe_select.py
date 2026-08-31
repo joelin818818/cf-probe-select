@@ -53,8 +53,7 @@ DNS_TIMEOUT_DOH = 5                     # DoH 解析超时
 CF_RANGES_TIMEOUT = 10                  # 拉取 Cloudflare 官方 IP 段的超时
 
 # ---- Cloudflare Gateway DoH 随机子域 ----
-# Gateway 的 DoH 端点接受任意子域（作为匿名 location），固定地址长期暴露易被针对性限速，
-# 故每次运行时随机生成一个 10 位「小写字母 + 数字」子域，让每次请求的 endpoint 都不同。
+# 每次运行随机生成 10 位「小写字母 + 数字」子域（Gateway 接受任意子域）。
 GATEWAY_SUB_LEN = 10
 
 
@@ -105,11 +104,11 @@ HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
-# 全局 Session，复用 TCP/TLS 连接，减少探测与扩散时的握手开销
+# 全局 Session，复用 TCP/TLS 连接
 HTTP_SESSION = requests.Session()
 HTTP_SESSION.headers.update(HEADERS)
 
-# 探测阶段 DNS 解析缓存：domain -> [ips]，供落盘前快速预判，避免重复解析
+# 探测阶段 DNS 解析缓存：domain -> [ips]
 DOMAIN_IP_CACHE = {}
 
 
@@ -347,11 +346,7 @@ def resolve_via_doh(domain: str, base_url: str, timeout: int = DNS_TIMEOUT_DOH) 
 
 # ==================== 修改点 1 ====================
 # 多源解析器：系统 DNS + 国内 DoH（腾讯/阿里）+ 全球 DoH（DNS.SB/Cloudflare Gateway/Google）
-# 与网页侧可信 DoH 对齐；移除在 Actions 网络下不稳定的 volcengine / 360 / cloudflare-dns.com。
-# 注：脚本跑在 GitHub Actions 服务端（无浏览器、无 CORS 限制），故腾讯 doh.pub 可用。
-# Cloudflare Gateway 地址与网页侧一致；fork 后若无法访问可自行替换为自己的 Gateway。
-# 注意：cf-gateway-doh 的子域在每次运行时随机生成（见配置区 random_gateway_sub），
-# 避免固定 endpoint 被针对性限速。若该随机子域不可用，宽松校验逻辑会忽略此源，不影响结果。
+# cf-gateway-doh 的子域每次运行随机生成（见 random_gateway_sub）。
 DNS_RESOLVERS = [
     ("system", "udp", None),
     ("tencent-doh", "doh", "https://doh.pub/dns-query"),
@@ -394,7 +389,7 @@ def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
 
     # ==================== 修改点 2 ====================
     def check(domain):
-        # 若探测阶段缓存的 IP 已包含非 CF，直接剔除，避免重复多源解析
+        # 探测阶段缓存的 IP 已含非 CF 则直接剔除（命中缓存，跳过校验）
         cached = DOMAIN_IP_CACHE.get(domain, [])
         if cached and not all(is_cloudflare_ip(ip) for ip in cached):
             return (domain, False, f"缓存IP含非CF: {','.join(cached)}")

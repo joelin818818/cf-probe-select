@@ -1,5 +1,5 @@
 // 前端页面模块：返回完整的 HTML 页面字符串（含内联前端脚本）
-// DNS 服务商列表从 worker.js 导入（全仓库唯一来源，避免多处维护不一致）
+// DNS 服务商列表从 worker.js 导入（全仓库唯一来源）
 import { DNS_PROVIDER_LIST, materializeDoh } from "./worker.js";
 
 // 生成 DNS 服务商下拉选项（按数组顺序）
@@ -36,7 +36,6 @@ const $ = (id) => document.getElementById(id);
 const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "状态", score: "综合" };
 
 // 浏览器端本地函数：兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key
-// （注意：本脚本是浏览器内联脚本，无 import，故在此自包含定义）
 function normalizeProviderKey(key) {
   const valid = ["local","aliyun","dnssb","cf_gateway","google","custom"];
   return valid.indexOf(key) >= 0 ? key : "local";
@@ -143,23 +142,21 @@ async function browserDohResolve(doh, domain, maxAttempts = 3) {
   throw lastErr;
 }
 
-// IP -> 是否 CF 的浏览器端缓存（去重，减少 /api/cf-check 调用）
+// IP -> 是否 CF 的浏览器端缓存
 const CF_CACHE = {};
 
-// CF 判定攒批：解析是并发的，若每个域名各自发一次 /api/cf-check，400 个域名就是 400 次请求。
-// 这里把待判定 IP 攒到 CF_BATCH_SIZE 个再统一发一次（后端单次最多支持 100 个 IP），
-// 请求数降到约 400/30 ≈ 14 次。CF_FLUSH_DELAY 是不足一批时的超时兜底，避免尾部 IP 一直等待。
+// CF 判定攒批：待判定 IP 攒到 CF_BATCH_SIZE 个再统一发一次（后端单次最多支持 100 个 IP）。
 const CF_BATCH_SIZE = 30;
 const CF_FLUSH_DELAY = 500;
 let cfPending = [];     // 待判定 IP
 let cfWaiters = [];     // 等待本批结果的 resolve 回调
-let cfFlushing = false; // 是否正在请求中（防止并发 flush）
+let cfFlushing = false; // 是否正在请求中
 let cfTimer = null;     // 超时兜底计时器
 
 async function flushCf() {
   if (cfFlushing || !cfPending.length) return;
   cfFlushing = true;
-  // 取快照：flush 期间新加入的 IP 归入下一批，避免本批无限增长
+  // 取快照：flush 期间新加入的 IP 归入下一批
   const waiters = cfWaiters.slice();
   const batch = cfPending.slice();
   cfWaiters = [];
@@ -179,7 +176,7 @@ async function flushCf() {
   if (cfPending.length) flushCf();
 }
 
-// 不足一批时的兜底：延迟一小段时间强制 flush，防止尾部几个 IP 永远等不到满批
+// 不足一批时的兜底：延迟一小段时间强制 flush
 function scheduleCfFlush() {
   if (cfTimer) return;
   cfTimer = setTimeout(() => {
@@ -310,8 +307,7 @@ async function runPool(tasks, size) {
   await Promise.all(ws);
 }
 
-// 开始测速前的统一预检：对所有 DNS 服务商（含公开 DoH 与自定义）做一次连通性校验，
-// 不可用时中止并提示，避免静默产出空 IP。local 由服务端解析，无需浏览器预检。
+// 开始测速前的统一预检：对所有 DNS 服务商（含公开 DoH 与自定义）做一次连通性校验。
 async function preflightCheck() {
   const provider = loadProvider();
   const customDoh = loadCustomDoh().trim();
@@ -324,8 +320,7 @@ async function preflightCheck() {
   }
   if (!doh) { alert("未知 DNS 服务商"); return false; }
 
-  // 随机子域类服务商（Cloudflare Gateway）：当前子域不可用时自动换一个重试一次，
-  // 避免偶发随机到不可用子域就导致整个功能不可用。
+  // 随机子域类服务商（Cloudflare Gateway）：当前子域不可用时自动换一个重试一次。
   const canRotate = !!GATEWAY_DOH_TEMPLATE && doh.indexOf(".cloudflare-gateway.com") >= 0;
   const maxAttempt = canRotate ? 2 : 1;
 
@@ -406,7 +401,7 @@ async function startTest() {
   measuredCount = 0;
   const coarseTasks = domains.map((d) => async () => {
     if (stopRequested) return;
-    // 无 IP 的域名直接跳过测速，避免无意义请求并显示"解析失败"
+    // 无 IP 的域名直接跳过测速
     if (!ipMap[d] || !ipMap[d].length) {
       stateMap[d].phase = "done";
       stateMap[d].status = "err";
@@ -593,6 +588,7 @@ function sortRows() {
 }
 
 // 转义用于 HTML 属性值/文本的内容，防止域名中含 " < > & 破坏结构
+// 转义用于 HTML 属性值/文本的内容
 function esc(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -602,7 +598,6 @@ function esc(s) {
 }
 
 // 筛选判定：域名是否通过当前的搜索/开关条件。
-// 注意：筛选只影响表格显示，不影响上方指标卡的统计（指标卡始终反映全量测速状态）。
 function passFilter(d) {
   if (filterText) {
     const kw = filterText.trim().toLowerCase();

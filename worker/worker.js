@@ -45,14 +45,11 @@ export const DNS_PROVIDER_LIST = [
   { key: "local", label: "本地（服务端 DNS）", doh: "", note: "服务端运行环境默认递归解析" },
   // 仅保留浏览器直连可用（服务端返回 CORS 头）的公开 DoH。
   // 验证结论（2026-08-26）：腾讯/360 等国内 DoH 不返回 Access-Control-Allow-Origin 头，
-  // 浏览器直连必被 CORS 拦截（与 URL 路径无关），已移除；Cloudflare 1.1.1.1 / OpenDNS
-  // 在国内网络不可达，已移除并改用国际备选。阿里经实测返回 CORS:*；AdGuard/Quad9/DNS.SB
-  // 为业界公认支持 CORS 的 DoH。
+  // 浏览器直连必被 CORS 拦截，已移除；Cloudflare 1.1.1.1 / OpenDNS 在国内不可达，已移除。
+  // 阿里经实测返回 CORS:*，可用。
   { key: "aliyun", label: "阿里 DoH（国内）", doh: "https://dns.alidns.com/resolve" },
   { key: "dnssb", label: "DNS.SB DoH（香港）", doh: "https://doh.dns.sb/dns-query" },
-  // Gateway DoH 接受任意子域（作为匿名 location）。固定子域长期暴露易被针对性限速，
-  // 故每次渲染页面时随机生成一个 10 位「小写字母 + 数字」子域（替换模板里的 {sub}），
-  // 让每次打开网页拿到的 endpoint 都不同。见 randomGatewaySub() 与 page.js 的注入逻辑。
+  // Gateway DoH 接受任意子域，故模板用随机 {sub} 子域（每次渲染页面时生成）。
   { key: "cf_gateway", label: "Cloudflare Gateway DoH（随机子域）", doh: "https://{sub}.cloudflare-gateway.com/dns-query", randomSubdomain: true },
   { key: "google", label: "Google DoH（国际）", doh: "https://dns.google/resolve" },
   { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },
@@ -92,7 +89,7 @@ function resolveDohList(provider, customDoh) {
   if (provider === "custom") {
     if (customDoh && /^https:\/\//i.test(customDoh.trim())) list.push(customDoh.trim());
   } else if (provider && DNS_PROVIDERS[provider] && DNS_PROVIDERS[provider].doh) {
-    // Gateway 等带 {sub} 模板的服务商在此实例化为随机子域，避免返回未替换的模板
+    // Gateway 等带 {sub} 模板的服务商在此实例化为随机子域
     list.push(materializeDoh(DNS_PROVIDERS[provider]));
   }
   return list; // 非空表示浏览器直连模式（前端不调用此函数解析）
@@ -129,7 +126,7 @@ function ipToLong(ip) {
   return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3];
 }
 function isIpInCf(ip, ranges) {
-  if (!ranges || !ranges.length) return true; // 段未加载时放行，避免误杀
+  if (!ranges || !ranges.length) return true; // 段未加载时放行
   const long = ipToLong(ip);
   for (const cidr of ranges) {
     const [net, bits] = cidr.split("/");
@@ -199,12 +196,9 @@ async function testDoh(doh) {
 }
 
 // ====================================================================
-// cf_domains.txt 在 GitHub 仓库的位置（main 分支）
-// 直接走 GitHub 官方 raw 域名，避免第三方代理（dl.lbcn.top 等）失效导致读取不到列表
-// --------------------------------------------------------------------
-// fork 友好：部署时优先用 wrangler.toml 的 [vars] RAW_DOMAINS_URL（由
-// .github/workflows/probe.yml 自动检测当前仓库地址写入）。未配置则回退以下默认值：
-// 初始为上游仓库；fork 后 Actions 会自动改写成 fork 仓库地址，避免锁死在上游。
+// cf_domains.txt 在 GitHub 仓库的位置（main 分支）。
+// 部署时优先用 wrangler.toml 的 [vars] RAW_DOMAINS_URL（由 probe.yml 自动写入当前仓库地址）；
+// 未配置则回退以下默认值。
 // ====================================================================
 const DEFAULT_RAW_DOMAINS_URL = "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 
@@ -219,12 +213,10 @@ function json(body, status = 200, headers = {}) {
   });
 }
 
-// 域名列表缓存 TTL（毫秒）。cf_domains.txt 由 Actions 每天更新一次，缓存 120 秒对时效性
-// 无影响，但能大幅减少对 raw.githubusercontent.com 的请求压力（频繁请求有被限流的风险）。
+// 域名列表缓存 TTL（毫秒）。
 const DOMAINS_CACHE_TTL = 120 * 1000;
 
-// 读取域名列表（带 120 秒缓存）。用 Cache API 而非模块级变量，这样才能在同一 PoP 内
-// 跨请求命中。缓存不可用时自动降级为「每次回源」，不影响功能。
+// 读取域名列表（带 120 秒缓存，用 Cache API 实现跨请求命中；不可用时降级为每次回源）。
 async function fetchDomainsCached(rawUrl) {
   const cacheKey = "https://domains.cache.local/" + encodeURIComponent(rawUrl);
   let cache = null;
@@ -241,7 +233,7 @@ async function fetchDomainsCached(rawUrl) {
     cache = null; // Cache API 不可用则降级为不缓存
   }
 
-  // 回源：加时间戳绕过 raw.githubusercontent.com 的 CDN 缓存，确保拿到最新内容
+  // 回源：加时间戳绕过 raw.githubusercontent.com 的 CDN 缓存
   const nocacheUrl = rawUrl + "?t=" + Date.now();
   let res;
   try {
