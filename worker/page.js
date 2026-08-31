@@ -14,8 +14,7 @@ const FRONTEND_JS = `
 const TIMEOUT = 4000;       // 单域名测速超时
 const RENDER_EVERY = 5;     // 每完成 5 个刷新一次列表
 const MAX_IPS = 3;          // 单域名最多展示的解析 IP 数（展示全部解析结果，封顶 3 个）
-// 两阶段测速：先全量粗筛（1 轮）快速出全貌，再对延迟最低的 Top N 精测（3 轮）取平均。
-// 这样用户一两分钟就能看到完整排序，不用等 400 个域名各测 3 轮（光轮间等待就 20 多分钟）。
+// 两阶段测速：先全量粗筛（1 轮），再对延迟最低的 Top N 精测（3 轮）取平均。
 const COARSE_ROUNDS = 1;    // 粗筛阶段每个域名的测速轮数
 const FINE_ROUNDS = 3;      // 精测阶段每个域名的测速轮数
 const ROUND_GAP = 2000;     // 测速轮与轮之间的间隔（毫秒）
@@ -574,7 +573,7 @@ function sortRows() {
     return vb - va;
   });
   else if (sortMode === "status") arr.sort((a, b) => ((stateMap[a] && stateMap[a].status) || "").localeCompare((stateMap[b] && stateMap[b].status) || ""));
-  } else { // lat / score：两者口径一致，均按「阶段 → 成功率 → 平均延迟」排序
+  else { // lat / score：两者口径一致，均按「阶段 → 成功率 → 平均延迟」排序
     arr.sort((a, b) => {
       const sa = stateMap[a], sb = stateMap[b];
       const ha = sa && sa.rounds, hb = sb && sb.rounds;
@@ -587,7 +586,6 @@ function sortRows() {
   return arr;
 }
 
-// 转义用于 HTML 属性值/文本的内容，防止域名中含 " < > & 破坏结构
 // 转义用于 HTML 属性值/文本的内容
 function esc(s) {
   return String(s)
