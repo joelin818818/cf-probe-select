@@ -260,6 +260,7 @@ MALICIOUS_EXACT = set()
 def load_blocklists():
     global MALICIOUS_EXACT
     MALICIOUS_EXACT = set()
+    ok_sources = 0
     for jsd, gh in MALICIOUS_BLOCKLIST_SOURCES:
         text = None
         for url in (jsd, gh):
@@ -273,6 +274,7 @@ def load_blocklists():
         if not text:
             print(f"[!] 黑名单源拉取失败（已跳过）: {jsd}")
             continue
+        ok_sources += 1
         for line in text.splitlines():
             d = line.strip().lower()
             if not d or d.startswith("#"):
@@ -280,6 +282,7 @@ def load_blocklists():
             if d.startswith("*."):
                 d = d[2:]
             MALICIOUS_EXACT.add(d)
+    print(f"[*] 黑名单已加载：{ok_sources}/{len(MALICIOUS_BLOCKLIST_SOURCES)} 个源成功，共 {len(MALICIOUS_EXACT)} 条")
 
 def is_malicious(domain: str) -> bool:
     d = domain.lower()
@@ -594,6 +597,16 @@ def pick_seeds(saved: set) -> list:
 def run_cf_explorer():
     saved, root_sub_count = load_existing_domains(OUTPUT_FILE)
     load_blocklists()
+    if MALICIOUS_EXACT:
+        before = len(saved)
+        dropped = [d for d in saved if is_malicious(d)]
+        for d in dropped:
+            saved.discard(d)
+            root = get_registered_domain(d)
+            if root_sub_count.get(root, 0) > 0:
+                root_sub_count[root] -= 1
+        if dropped:
+            print(f"[*] 存量黑名单剔除：移除 {len(dropped)} 个黑产域名（{before} -> {len(saved)}）")
     print(f"[*] 已载入 {len(saved)} 个已有域名")
 
     start_time = time.time()
