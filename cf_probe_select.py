@@ -56,6 +56,17 @@ CF_RANGES_TIMEOUT = 10                  # 拉取 Cloudflare 官方 IP 段的超�
 # 每次运行随机生成 10 位「小写字母 + 数字」子域（Gateway 接受任意子域）。
 GATEWAY_SUB_LEN = 10
 
+# ---- 黑产域名黑名单（落盘前剔除，但保留为外链扩散跳板）----
+MALICIOUS_BLOCKLIST_SOURCES = [
+    ("https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/gambling.medium-onlydomains.txt",
+     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling.medium-onlydomains.txt"),
+    ("https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/tif.medium-onlydomains.txt",
+     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt"),
+    ("https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/fake-onlydomains.txt",
+     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/fake-onlydomains.txt"),
+]
+MALICIOUS_BLOCKLIST_TIMEOUT = 15
+
 
 def random_gateway_sub(n: int = GATEWAY_SUB_LEN) -> str:
     """生成 n 位「小写字母 + 数字」随机串，用作 Cloudflare Gateway DoH 的随机子域。"""
@@ -242,6 +253,40 @@ def is_cloudflare_own_domain(domain: str) -> bool:
 def is_big_tech(domain: str) -> bool:
     root = get_registered_domain(domain)
     return root in BIG_TECH_ROOTS
+
+
+MALICIOUS_EXACT = set()
+
+def load_blocklists():
+    global MALICIOUS_EXACT
+    MALICIOUS_EXACT = set()
+    for jsd, gh in MALICIOUS_BLOCKLIST_SOURCES:
+        text = None
+        for url in (jsd, gh):
+            try:
+                r = HTTP_SESSION.get(url, timeout=MALICIOUS_BLOCKLIST_TIMEOUT)
+                if r.status_code == 200 and r.text.strip():
+                    text = r.text
+                    break
+            except Exception:
+                continue
+        if not text:
+            print(f"[!] 黑名单源拉取失败（已跳过）: {jsd}")
+            continue
+        for line in text.splitlines():
+            d = line.strip().lower()
+            if not d or d.startswith("#"):
+                continue
+            if d.startswith("*."):
+                d = d[2:]
+            MALICIOUS_EXACT.add(d)
+
+def is_malicious(domain: str) -> bool:
+    d = domain.lower()
+    for base in MALICIOUS_EXACT:
+        if d == base or d.endswith("." + base):
+            return True
+    return False
 
 
 def is_cloudflare_ip(ip_str: str) -> bool:
@@ -548,6 +593,7 @@ def pick_seeds(saved: set) -> list:
 
 def run_cf_explorer():
     saved, root_sub_count = load_existing_domains(OUTPUT_FILE)
+    load_blocklists()
     print(f"[*] 已载入 {len(saved)} 个已有域名")
 
     start_time = time.time()
@@ -637,6 +683,11 @@ def run_cf_explorer():
 
         if is_big_tech(current):
             print(" -> [巨型站 不入库但扩散外链]")
+            _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
+            return
+
+        if is_malicious(current):
+            print(" -> [黑产域名 仅扩散外链]")
             _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
             return
 
