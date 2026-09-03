@@ -352,6 +352,43 @@ def is_blackhat_keyword(domain: str) -> bool:
     return False
 
 
+# ---- 域名优先级梯队（数值越小越优，用于主域配额满额时的择优保留）----
+TIER_T0 = 0
+TIER_T1 = 1
+TIER_T2 = 2
+TIER_T3 = 3
+TIER_T4 = 4
+TIER_T5 = 5
+
+TIER_T0_PREFIX = ("cdn", "static", "assets", "registry", "dist", "esm", "pkg")
+TIER_T1_PREFIX = ("api", "data", "scripts", "telemetry", "events", "ingest", "c")
+TIER_T2_PREFIX = ("docs", "hub", "developer", "help", "kb", "wiki")
+TIER_T2_SUFFIX = (".edu", ".org", ".gov")
+TIER_T3_PREFIX = ("www", "app", "dashboard", "portal", "cloud", "console", "account")
+TIER_T5_PREFIX = ("staging", "test", "dev", "demo", "sandbox", "preview", "temp")
+
+
+def tier_of(domain: str) -> int:
+    d = domain.lower()
+    parts = d.split(".")
+    sub = parts[0] if len(parts) > 1 else ""
+    if re.search(r"\d{8,}", d) or re.search(r"^[0-9a-f]{8,}$", sub):
+        return TIER_T5
+    if sub in TIER_T5_PREFIX:
+        return TIER_T5
+    if sub in TIER_T0_PREFIX:
+        return TIER_T0
+    if d.endswith(TIER_T2_SUFFIX):
+        return TIER_T2
+    if sub in TIER_T1_PREFIX:
+        return TIER_T1
+    if sub in TIER_T2_PREFIX:
+        return TIER_T2
+    if sub in TIER_T3_PREFIX:
+        return TIER_T3
+    return TIER_T4
+
+
 def is_cloudflare_ip(ip_str: str) -> bool:
     """判断 IP 是否落在 Cloudflare 官方 IPv4 CIDR 内（只认 IP 段硬过滤，二分查找 O(log n)）"""
     try:
@@ -556,13 +593,13 @@ def filter_non_cf_domains(saved: set, root_sub_count: defaultdict):
 
 
 def _trim_by_root_quota(saved: set, root_sub_count: defaultdict, quota: int) -> int:
-    """将每主域名下的子域数量收紧到 quota（按字母序保留前 quota 个）。原地修改 saved 与 root_sub_count，返回新数量。"""
+    """将每主域名下的子域数量收紧到 quota（按梯队升序优先，同梯队按字母序）。原地修改 saved 与 root_sub_count，返回新数量。"""
     groups = defaultdict(list)
     for d in saved:
         groups[get_registered_domain(d)].append(d)
     new_saved = set()
     for root, subs in groups.items():
-        for d in sorted(subs)[:quota]:
+        for d in sorted(subs, key=lambda x: (tier_of(x), x))[:quota]:
             new_saved.add(d)
     saved.clear()
     saved.update(new_saved)
@@ -759,19 +796,33 @@ def run_cf_explorer():
             tag, prio = "黑产域名 仅扩散外链", False
         elif is_blackhat_keyword(current):
             tag, prio = "黑产关键词 仅扩散外链", False
+        elif tier_of(current) >= TIER_T5:
+            tag, prio = "T5 风险域名 仅扩散外链", False
         elif is_cloudflare_own_domain(current):
             tag, prio = "CF官方域名 探索外链", True
         elif current in saved:
             tag, prio = "已在记录中 仅扩散外链", is_cf
         elif is_cf:
+            skip = False
             with state_lock:
                 if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
-                    log(f"[?] 检测: {current:<40} -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
-                    return
-                saved.add(current)
-                root_sub_count[root] += 1
-                new_added += 1
-            tag, prio = "命中 Cloudflare 第三方", True
+                    subs = [d for d in saved if get_registered_domain(d) == root]
+                    worst = max(subs, key=lambda d: (tier_of(d), d)) if subs else None
+                    if worst is not None and tier_of(current) < tier_of(worst):
+                        saved.discard(worst)
+                        saved.add(current)
+                        tag = f"命中 Cloudflare 第三方 | 替换低优 {worst}"
+                    else:
+                        skip = True
+                else:
+                    saved.add(current)
+                    root_sub_count[root] += 1
+                    new_added += 1
+                    tag = "命中 Cloudflare 第三方"
+            if skip:
+                log(f"[?] 检测: {current:<40} -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
+                return
+            prio = True
         else:
             tag, prio = "非 Cloudflare 仅扩散外链", False
 
