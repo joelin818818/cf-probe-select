@@ -1,0 +1,97 @@
+# 自建黑产关键词黑名单（cf_probe_select.py 嗅探时作为排除条件）
+# 两段：
+#   1) 独占黑词：子串命中即 100% 黑产，每行一个（小写）
+#   2) 边界博彩词：从 ===== 分隔行开始，仅独立单词 / 单词+数字 / 数字+单词 命中，防误杀 alphabet/sloth/sussex 等
+# 修改后下次运行自动生效，无需改代码。
+
+# ---------- 1) 独占黑词（子串命中） ----------
+nohu
+keonhacai
+nhacai
+kubet
+thabet
+go88
+hitclub
+rikbet
+iwin
+sunwin
+789club
+shbet
+jun88
+f8bet
+hi88
+okvip
+gamebai
+lode
+xoso
+bong88
+sv388
+taixiu
+xocdia
+88online
+gacor
+judionline
+togel
+slotgacor
+slot88
+maxwin
+pragmaticplay
+dominoqq
+pokerqq
+bandarq
+sbobet
+slotxo
+pgslot
+ufabet
+joker123
+jinsha
+pujing
+weinisiren
+taiyangcheng
+kyqp
+kaiyuanqipai
+bocai
+liuhecai
+pk10
+shishicai
+xyft
+kuaisan
+paofen
+zijinpan
+shuadan
+claim-airdrop
+airdrop-claim
+wallet-connect
+connect-wallet
+seed-phrase
+drainer
+metamask-verify
+infostealer
+xmrig
+91porn
+madou
+javhd
+stripchat
+chaturbate
+vip-jiexi
+dytt
+888yes
+
+# ---------- 2) 边界博彩词（仅边界命中，分三类；防 .win/.vip 等 TLD 误杀） ----------
+===== 边界-独立单词（仅独立单词命中，如 casino-online）=====
+casino
+roulette
+baccarat
+sportsbook
+blackjack
+===== 边界-单词±数字（不含独立，避免 .win/.vip TLD 误杀）=====
+bet
+slot
+win
+vip
+===== 边界-吉利连号（独立数字命中）=====
+888
+777
+999
+188
+365

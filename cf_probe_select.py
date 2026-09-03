@@ -67,6 +67,9 @@ MALICIOUS_BLOCKLIST_SOURCES = [
 ]
 MALICIOUS_BLOCKLIST_TIMEOUT = 15
 
+# ---- 自建黑产关键词黑名单（子串/边界匹配，落盘前剔除但保留为外链扩散跳板）----
+KEYWORD_BLACKLIST_FILE = "blacklist_keywords.txt"
+
 
 def random_gateway_sub(n: int = GATEWAY_SUB_LEN) -> str:
     """生成 n 位「小写字母 + 数字」随机串，用作 Cloudflare Gateway DoH 的随机子域。"""
@@ -289,6 +292,55 @@ def is_malicious(domain: str) -> bool:
     for base in MALICIOUS_EXACT:
         if d == base or d.endswith("." + base):
             return True
+    return False
+
+
+KEYWORD_SUBSTR = set()
+KEYWORD_BOUNDED_RE = None
+
+def load_keyword_blacklist():
+    global KEYWORD_SUBSTR, KEYWORD_BOUNDED_RE
+    KEYWORD_SUBSTR = set()
+    bounded = []
+    mode = "substr"
+    bounded_mode = "standalone"
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), KEYWORD_BLACKLIST_FILE)
+    if not os.path.exists(path):
+        print(f"[!] 关键词黑名单文件不存在，跳过: {path}")
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip().lower()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("====="):
+                if "±数字" in line:
+                    bounded_mode = "combo"
+                elif "连号" in line or "数字" in line:
+                    bounded_mode = "number"
+                else:
+                    bounded_mode = "standalone"
+                mode = "bounded"
+                continue
+            if mode == "substr":
+                KEYWORD_SUBSTR.add(line)
+            else:
+                esc = re.escape(line)
+                if bounded_mode == "combo":
+                    bounded.append(r"(?:^|[\.\-])(" + esc + r"\d+|\d+" + esc + r")(?:[\.\-]|$)")
+                else:
+                    bounded.append(r"(?:^|[\.\-])(" + esc + r")(?:[\.\-]|$)")
+    if bounded:
+        KEYWORD_BOUNDED_RE = re.compile("|".join(bounded), re.IGNORECASE)
+    print(f"[*] 关键词黑名单已加载：独占黑词 {len(KEYWORD_SUBSTR)} 条，边界词已编译")
+
+def is_blackhat_keyword(domain: str) -> bool:
+    d = domain.lower()
+    for kw in KEYWORD_SUBSTR:
+        if kw in d:
+            return True
+    if KEYWORD_BOUNDED_RE and KEYWORD_BOUNDED_RE.search(d):
+        return True
     return False
 
 
@@ -597,9 +649,10 @@ def pick_seeds(saved: set) -> list:
 def run_cf_explorer():
     saved, root_sub_count = load_existing_domains(OUTPUT_FILE)
     load_blocklists()
-    if MALICIOUS_EXACT:
+    load_keyword_blacklist()
+    if MALICIOUS_EXACT or KEYWORD_SUBSTR or KEYWORD_BOUNDED_RE:
         before = len(saved)
-        dropped = [d for d in saved if is_malicious(d)]
+        dropped = [d for d in saved if is_malicious(d) or is_blackhat_keyword(d)]
         for d in dropped:
             saved.discard(d)
             root = get_registered_domain(d)
@@ -701,6 +754,11 @@ def run_cf_explorer():
 
         if is_malicious(current):
             print(" -> [黑产域名 仅扩散外链]")
+            _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
+            return
+
+        if is_blackhat_keyword(current):
+            print(" -> [黑产关键词 仅扩散外链]")
             _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
             return
 
