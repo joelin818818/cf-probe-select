@@ -125,6 +125,14 @@ HTTP_SESSION.headers.update(HEADERS)
 # 探测阶段 DNS 解析缓存：domain -> [ips]
 DOMAIN_IP_CACHE = {}
 
+# 多线程下 stdout 打印锁，保证每行日志原子输出不交错
+PRINT_LOCK = threading.Lock()
+
+
+def log(msg: str):
+    with PRINT_LOCK:
+        print(msg, flush=True)
+
 
 def load_cf_ip_ranges(timeout: int = CF_RANGES_TIMEOUT):
     """从 Cloudflare 官网拉取最新 IPv4 CIDR 段，失败则返回兜底列表。"""
@@ -745,49 +753,35 @@ def run_cf_explorer():
         is_cf = is_cloudflare_domain(current)
         root = get_registered_domain(current)
 
-        print(f"[?] 检测: {current:<40}", end="", flush=True)
-
         if is_big_tech(current):
-            print(" -> [巨型站 不入库但扩散外链]")
-            _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
-            return
-
-        if is_malicious(current):
-            print(" -> [黑产域名 仅扩散外链]")
-            _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
-            return
-
-        if is_blackhat_keyword(current):
-            print(" -> [黑产关键词 仅扩散外链]")
-            _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
-            return
-
-        if is_cloudflare_own_domain(current):
-            print(" -> [CF官方域名 探索外链]")
-            _expand(current, enqueue, visited, non_cf_roots, priority=True, lock=state_lock)
+            tag, prio = "巨型站 不入库但扩散外链", False
+        elif is_malicious(current):
+            tag, prio = "黑产域名 仅扩散外链", False
+        elif is_blackhat_keyword(current):
+            tag, prio = "黑产关键词 仅扩散外链", False
+        elif is_cloudflare_own_domain(current):
+            tag, prio = "CF官方域名 探索外链", True
         elif current in saved:
-            print(" -> [已在记录中 仅扩散外链]")
-            _expand(current, enqueue, visited, non_cf_roots, priority=is_cf, lock=state_lock)
+            tag, prio = "已在记录中 仅扩散外链", is_cf
         elif is_cf:
             with state_lock:
                 if root_sub_count.get(root, 0) >= MAX_SUBDOMAINS_PER_ROOT:
-                    print(f" -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
+                    log(f"[?] 检测: {current:<40} -> [主域 {root} 已达上限 {MAX_SUBDOMAINS_PER_ROOT} 跳过]")
                     return
-                print(" -> [命中 Cloudflare 第三方]")
                 saved.add(current)
                 root_sub_count[root] += 1
                 new_added += 1
-            _expand(current, enqueue, visited, non_cf_roots, priority=True, lock=state_lock)
+            tag, prio = "命中 Cloudflare 第三方", True
         else:
-            # 非 CF 域名本身不入库，但继续扩散其外链，
-            # 顺着外链可能挖到走 Cloudflare 的第三方站，直到 PROBE_TIME_LIMIT 用完。
-            print(" -> [非 Cloudflare 仅扩散外链]")
-            _expand(current, enqueue, visited, non_cf_roots, priority=False, lock=state_lock)
+            tag, prio = "非 Cloudflare 仅扩散外链", False
+
+        added = _expand(current, enqueue, visited, non_cf_roots, priority=prio, lock=state_lock)
+        log(f"[?] 检测: {current:<40} -> [{tag}]" + (f" | 扩散 {added}" if added else ""))
 
     with ThreadPoolExecutor(max_workers=WORKERS_PROBE) as pool:
         while (cf_q or normal_q) and new_added < MAX_NEW_PER_RUN:
             if time.time() - start_time >= PROBE_TIME_LIMIT:
-                print(f"\n[*] 已达探测时长上限 {PROBE_TIME_LIMIT}s，停止探测，进入收尾...")
+                log(f"\n[*] 已达探测时长上限 {PROBE_TIME_LIMIT}s，停止探测，进入收尾...")
                 break
 
             batch = next_batch(BATCH_SIZE)
@@ -830,11 +824,10 @@ def _expand(current, enqueue, visited, non_cf_roots, priority: bool = False, loc
                     if check:
                         enqueue(nd, priority=priority)
                         added += 1
-                if added:
-                    print(f"    └─ [+] 嗅探出 {added} 个新域名入队")
-                break
+                return added
         except Exception:
             continue
+    return 0
 
 
 if __name__ == "__main__":
