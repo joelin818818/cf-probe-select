@@ -549,52 +549,102 @@ const COUNTRY_CN = {
   "ZA":"南非","ZM":"赞比亚","ZW":"津巴布韦"
 };
 
-// 并发信号量，限制浏览器同时发出的归属地请求数
-let geoSem = 6;
-const geoWaiters = [];
-function geoAcquire() {
-  if (geoSem > 0) { geoSem--; return Promise.resolve(); }
-  return new Promise((resolve) => geoWaiters.push(resolve));
+// 归属地 API 并发信号量（按源单独限制，降低单源被限流概率）
+const GEO_SEM = { ipwho: 4, freeipapi: 3, ipapi: 3 };
+const GEO_WAITERS = { ipwho: [], freeipapi: [], ipapi: [] };
+function geoAcquire(source) {
+  const sem = GEO_SEM[source];
+  if (sem > 0) { GEO_SEM[source]--; return Promise.resolve(); }
+  return new Promise((resolve) => GEO_WAITERS[source].push(resolve));
 }
-function geoRelease() {
-  if (geoWaiters.length) { const r = geoWaiters.shift(); r(); }
-  else geoSem++;
+function geoRelease(source) {
+  if (GEO_WAITERS[source].length) { const r = GEO_WAITERS[source].shift(); r(); }
+  else GEO_SEM[source]++;
+}
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+async function fetchWithTimeout(url, opts = {}, timeout = 8000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), timeout);
+  try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+  finally { clearTimeout(id); }
+}
+async function fetchJson(url, opts = {}, timeout = 8000) {
+  const r = await fetchWithTimeout(url, opts, timeout);
+  if (!r.ok) {
+    const err = new Error("HTTP " + r.status);
+    err.status = r.status;
+    throw err;
+  }
+  return r.json();
 }
 
 async function lookupCountry(ip) {
   if (ip in GEO_CACHE) return GEO_CACHE[ip];
-  await geoAcquire();
+
+  const markFail = () => {
+    const res = { code: "", name: "" };
+    GEO_CACHE[ip] = res;
+    return res;
+  };
+
+  // 主：ipwho.is
+  await geoAcquire("ipwho");
   try {
-    // 主：ipwho.is
-    try {
-      const r = await fetch("https://ipwho.is/" + encodeURIComponent(ip), { cache: "no-store" });
-      if (r.ok) {
-        const d = await r.json();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const d = await fetchJson("https://ipwho.is/" + encodeURIComponent(ip), { cache: "no-store" }, 8000);
         if (d && d.success !== false && (d.country_code || d.country)) {
           const res = { code: d.country_code || "", name: d.country || "" };
           GEO_CACHE[ip] = res;
           return res;
         }
+        break;
+      } catch (e) {
+        if (e.status === 429) { await sleep(1000 * (attempt + 1)); continue; }
+        break;
       }
-    } catch (e) { /* 走备用 */ }
-    // 备：freeipapi.com
-    try {
-      const r = await fetch("https://free.freeipapi.com/api/json/" + encodeURIComponent(ip), { cache: "no-store" });
-      if (r.ok) {
-        const d = await r.json();
+    }
+  } finally { geoRelease("ipwho"); }
+
+  // 备 1：freeipapi.com
+  await geoAcquire("freeipapi");
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const d = await fetchJson("https://free.freeipapi.com/api/json/" + encodeURIComponent(ip), { cache: "no-store" }, 8000);
         if (d && d.status !== "fail" && (d.countryCode || d.countryName)) {
           const res = { code: d.countryCode || "", name: d.countryName || "" };
           GEO_CACHE[ip] = res;
           return res;
         }
+        break;
+      } catch (e) {
+        if (e.status === 429) { await sleep(1000 * (attempt + 1)); continue; }
+        break;
       }
-    } catch (e) { /* 忽略 */ }
-    const res = { code: "", name: "" };
-    GEO_CACHE[ip] = res;
-    return res;
-  } finally {
-    geoRelease();
-  }
+    }
+  } finally { geoRelease("freeipapi"); }
+
+  // 备 2：ipapi.co（HTTPS，CORS 友好）
+  await geoAcquire("ipapi");
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const d = await fetchJson("https://ipapi.co/" + encodeURIComponent(ip) + "/json/", { cache: "no-store" }, 8000);
+        if (d && d.error !== true && (d.country_code || d.country_name)) {
+          const res = { code: d.country_code || "", name: d.country_name || "" };
+          GEO_CACHE[ip] = res;
+          return res;
+        }
+        break;
+      } catch (e) {
+        if (e.status === 429) { await sleep(1000 * (attempt + 1)); continue; }
+        break;
+      }
+    }
+  } finally { geoRelease("ipapi"); }
+
+  return markFail();
 }
 
 // 渲染某域名的归属地（仅第一个 IP）
@@ -635,19 +685,28 @@ async function refreshGeo() {
   }
   if (!todo.length) return;
   await Promise.all(todo.map(async (ip) => {
-    const res = await lookupCountry(ip);
-    const sel = '#tbody .geo-loading[data-ip="' + (window.CSS && CSS.escape ? CSS.escape(ip) : ip) + '"]';
-    document.querySelectorAll(sel).forEach((s) => {
-      s.classList.remove("geo-loading");
-      if (res.code) {
-        const cn = COUNTRY_CN[res.code] || "";
-        s.textContent = cn || res.code;
-        s.title = (cn ? cn + " " : "") + res.code + (res.name && res.name !== cn ? " · " + res.name : "");
-      } else {
+    try {
+      const res = await lookupCountry(ip);
+      const sel = '#tbody .geo-loading[data-ip="' + (window.CSS && CSS.escape ? CSS.escape(ip) : ip) + '"]';
+      document.querySelectorAll(sel).forEach((s) => {
+        s.classList.remove("geo-loading");
+        if (res.code) {
+          const cn = COUNTRY_CN[res.code] || "";
+          s.textContent = cn || res.code;
+          s.title = (cn ? cn + " " : "") + res.code + (res.name && res.name !== cn ? " · " + res.name : "");
+        } else {
+          s.textContent = "?";
+          s.classList.add("geo-unknown");
+        }
+      });
+    } catch (e) {
+      const sel = '#tbody .geo-loading[data-ip="' + (window.CSS && CSS.escape ? CSS.escape(ip) : ip) + '"]';
+      document.querySelectorAll(sel).forEach((s) => {
+        s.classList.remove("geo-loading");
         s.textContent = "?";
         s.classList.add("geo-unknown");
-      }
-    });
+      });
+    }
   }));
 }
 function latHtml(d) {
