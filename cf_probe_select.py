@@ -490,7 +490,7 @@ def resolve_via_doh(domain: str, base_url: str, timeout: int = DNS_TIMEOUT_DOH) 
 
 
 # ==================== 修改点 1 ====================
-# 多源解析器：系统 DNS + 国内 DoH（腾讯/阿里）+ 全球 DoH（DNS.SB/Cloudflare Gateway/Google）
+# 多源解析器：系统 DNS + 公共 DoH（腾讯/阿里）+ 第三方 DoH（DNS.SB/Cloudflare Gateway/Google）
 # cf-gateway-doh 的子域每次运行随机生成（见 random_gateway_sub）。
 DNS_RESOLVERS = [
     ("system", "udp", None),

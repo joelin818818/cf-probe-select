@@ -354,7 +354,7 @@ async function preflightCheck() {
   if (provider === "custom") {
     extra = "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + lastDoh + " 并点「继续」）";
   } else {
-    extra = "\\n提示：该公开 DoH 可能不返回 CORS 头（浏览器直连会被拦截）或当前网络不可达。可尝试「阿里 DoH（国内）」「本地」或自定义 DoH；国际 DoH 需可访问境外网络。";
+    extra = "\\n提示：该公开 DoH 可能不返回 CORS 头（浏览器直连会被拦截）或当前网络不可达。可尝试「阿里 DoH」「本地」或自定义 DoH；部分公开 DoH（如 Google）需网络可直连其服务地址。";
   }
   alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\\n" + lastDoh +
     "\\n错误：" + (lastErr ? lastErr.message : "未知") + extra +

@@ -44,14 +44,14 @@ function bjVersion() {
 export const DNS_PROVIDER_LIST = [
   { key: "local", label: "本地（服务端 DNS）", doh: "", note: "服务端运行环境默认递归解析" },
   // 仅保留浏览器直连可用（服务端返回 CORS 头）的公开 DoH。
-  // 验证结论（2026-08-26）：腾讯/360 等国内 DoH 不返回 Access-Control-Allow-Origin 头，
-  // 浏览器直连必被 CORS 拦截，已移除；Cloudflare 1.1.1.1 / OpenDNS 在国内不可达，已移除。
+  // 验证结论（2026-08-26）：腾讯/360 等部分公共 DoH 不返回 Access-Control-Allow-Origin 头，
+  // 浏览器直连必被 CORS 拦截，已移除；Cloudflare 1.1.1.1 / OpenDNS 在部分网络环境下不可达，已移除。
   // 阿里经实测返回 CORS:*，可用。
-  { key: "aliyun", label: "阿里 DoH（国内）", doh: "https://dns.alidns.com/resolve" },
-  { key: "dnssb", label: "DNS.SB DoH（香港）", doh: "https://doh.dns.sb/dns-query" },
+  { key: "aliyun", label: "阿里 DoH", doh: "https://dns.alidns.com/resolve" },
+  { key: "dnssb", label: "DNS.SB DoH", doh: "https://doh.dns.sb/dns-query" },
   // Gateway DoH 接受任意子域，故模板用随机 {sub} 子域（每次渲染页面时生成）。
   { key: "cf_gateway", label: "Cloudflare Gateway DoH（随机子域）", doh: "https://{sub}.cloudflare-gateway.com/dns-query", randomSubdomain: true },
-  { key: "google", label: "Google DoH（国际）", doh: "https://dns.google/resolve" },
+  { key: "google", label: "Google DoH", doh: "https://dns.google/resolve" },
   { key: "custom", label: "自定义 DoH（浏览器直连）", doh: "", custom: true },
 ];
 

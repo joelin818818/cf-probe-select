@@ -37,10 +37,10 @@
 | 选项 | 地址 | 说明 |
 |---|---|---|
 | 本地（服务端 DNS） | — | Worker 边缘递归解析 |
-| 阿里 DoH（国内） | `dns.alidns.com/resolve` | 国内直连可用 |
-| DNS.SB DoH（香港） | `doh.dns.sb/dns-query` | 亚洲节点 |
+| 阿里 DoH | `dns.alidns.com/resolve` | 公共 DNS，直连可用 |
+| DNS.SB DoH | `doh.dns.sb/dns-query` | 亚洲节点 |
 | Cloudflare Gateway DoH | `<随机10位>.cloudflare-gateway.com/dns-query` | 子域每次打开网页随机生成 |
-| Google DoH（国际） | `dns.google/resolve` | 需访问境外网络 |
+| Google DoH | `dns.google/resolve` | 需网络可直连 dns.google |
 | 自定义 DoH | 自填 | 浏览器直连 |
 
 Cloudflare Gateway DoH 的子域在**每次打开网页时随机生成**（10 位小写字母 + 数字）。Gateway 的 DoH 端点接受任意子域，随机化可以避免固定地址长期暴露后被针对性限速。若随机到的子域恰好不可用，开始测速前的预检会自动换一个子域重试一次。
