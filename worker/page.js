@@ -67,7 +67,7 @@ async function loadDomains(attempt = 1) {
   let t;
   try {
     $("src").textContent = "数据源：GitHub 自动探测累积（实时）· 加载中…";
-    $("tbody").innerHTML = '<tr><td colspan="6" class="empty">加载中…' + (attempt > 1 ? "（第 " + attempt + " 次重试）" : "") + "</td></tr>";
+    $("tbody").innerHTML = '<tr><td colspan="7" class="empty">加载中…' + (attempt > 1 ? "（第 " + attempt + " 次重试）" : "") + "</td></tr>";
     const ctrl = new AbortController();
     t = setTimeout(() => ctrl.abort(), 15000);
     const r = await fetch("/api/domains", { cache: "no-store", signal: ctrl.signal });
@@ -102,7 +102,7 @@ async function loadDomains(attempt = 1) {
       setTimeout(() => loadDomains(attempt + 1), 2000);
     } else {
       $("src").textContent = "数据源：GitHub 自动探测累积（加载失败，请刷新重试）";
-      $("tbody").innerHTML = '<tr><td colspan="6" class="empty">加载失败：' + e.message +
+      $("tbody").innerHTML = '<tr><td colspan="7" class="empty">加载失败：' + e.message +
         ' <button id="retryLoad" class="ghost">重试加载</button></td></tr>';
       $("start").disabled = false;
       const btn = $("retryLoad");
@@ -512,6 +512,107 @@ function ipHtml(domain) {
     return '<span class="ip-item"><span class="' + cls + '">' + x.ip + "</span></span>";
   }).join(" · ") + "</span>";
 }
+
+// ===== IP 归属地查询（浏览器端直连第三方 API，避免服务端出站触发限额）=====
+// 仅查每个域名的「第一个 IP」即可满足归属地展示需求。
+// 主用 ipwho.is，备用 freeipapi.com；同 IP 仅查一次（GEO_CACHE 去重）。
+const GEO_CACHE = {}; // ip -> { code, name }
+
+// 并发信号量，限制浏览器同时发出的归属地请求数
+let geoSem = 6;
+const geoWaiters = [];
+function geoAcquire() {
+  if (geoSem > 0) { geoSem--; return Promise.resolve(); }
+  return new Promise((resolve) => geoWaiters.push(resolve));
+}
+function geoRelease() {
+  if (geoWaiters.length) { const r = geoWaiters.shift(); r(); }
+  else geoSem++;
+}
+
+async function lookupCountry(ip) {
+  if (ip in GEO_CACHE) return GEO_CACHE[ip];
+  await geoAcquire();
+  try {
+    // 主：ipwho.is
+    try {
+      const r = await fetch("https://ipwho.is/" + encodeURIComponent(ip), { cache: "no-store" });
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.success !== false && (d.country_code || d.country)) {
+          const res = { code: d.country_code || "", name: d.country || "" };
+          GEO_CACHE[ip] = res;
+          return res;
+        }
+      }
+    } catch (e) { /* 走备用 */ }
+    // 备：freeipapi.com
+    try {
+      const r = await fetch("https://free.freeipapi.com/api/json/" + encodeURIComponent(ip), { cache: "no-store" });
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.status !== "fail" && (d.countryCode || d.countryName)) {
+          const res = { code: d.countryCode || "", name: d.countryName || "" };
+          GEO_CACHE[ip] = res;
+          return res;
+        }
+      }
+    } catch (e) { /* 忽略 */ }
+    const res = { code: "", name: "" };
+    GEO_CACHE[ip] = res;
+    return res;
+  } finally {
+    geoRelease();
+  }
+}
+
+// 渲染某域名的归属地（仅第一个 IP）
+function geoHtml(d) {
+  const list = ipMap[d];
+  if (!list || !list.length) return '<span class="badge">—</span>';
+  const ip = list[0].ip;
+  const cached = GEO_CACHE[ip];
+  if (cached) {
+    if (cached.code) return '<span class="geo" title="' + esc(cached.name || cached.code) + '">' + esc(cached.code) + "</span>";
+    return '<span class="geo geo-unknown">?</span>';
+  }
+  return '<span class="geo geo-loading" data-ip="' + esc(ip) + '">…</span>';
+}
+
+// 第一个 IP 的归属地排序键
+function geoKey(d) {
+  const list = ipMap[d] || [];
+  if (list.length && GEO_CACHE[list[0].ip] && GEO_CACHE[list[0].ip].code) return GEO_CACHE[list[0].ip].code;
+  return "";
+}
+
+// 扫描当前表格里尚未查询的归属地，异步补查并就地更新（不触发整表重渲染）
+async function refreshGeo() {
+  const spans = Array.from(document.querySelectorAll("#tbody .geo-loading"));
+  const todo = [];
+  const seen = new Set();
+  for (const sp of spans) {
+    const ip = sp.getAttribute("data-ip");
+    if (!ip || ip in GEO_CACHE || seen.has(ip)) continue;
+    seen.add(ip);
+    todo.push(ip);
+  }
+  if (!todo.length) return;
+  await Promise.all(todo.map(async (ip) => {
+    const res = await lookupCountry(ip);
+    const sel = '#tbody .geo-loading[data-ip="' + (window.CSS && CSS.escape ? CSS.escape(ip) : ip) + '"]';
+    document.querySelectorAll(sel).forEach((s) => {
+      s.classList.remove("geo-loading");
+      if (res.code) {
+        s.textContent = res.code;
+        s.title = res.name || res.code;
+      } else {
+        s.textContent = "?";
+        s.classList.add("geo-unknown");
+      }
+    });
+  }));
+}
 function latHtml(d) {
   const s = stateMap[d];
   if (!s || s.phase === "idle" || s.phase === "resolving" || (s.phase === "resolved" && s.status === "resolved")) {
@@ -588,6 +689,7 @@ function sortRows() {
     return vb - va;
   });
   else if (sortMode === "status") arr.sort((a, b) => ((stateMap[a] && stateMap[a].status) || "").localeCompare((stateMap[b] && stateMap[b].status) || ""));
+  else if (sortMode === "geo") arr.sort((a, b) => geoKey(a).localeCompare(geoKey(b)));
   else { // lat / score：两者口径一致，均按「阶段 → 成功率 → 平均延迟」排序
     arr.sort((a, b) => {
       const sa = stateMap[a], sb = stateMap[b];
@@ -666,7 +768,7 @@ function render() {
   const tbody = $("tbody");
   updateFilterInfo(rows.length, all.length);
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty">' +
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">' +
       (all.length ? "没有符合筛选条件的域名" : "暂无数据") + "</td></tr>";
     updateStats();
     return;
@@ -680,6 +782,7 @@ function render() {
     html += '<td class="rank">' + (bestCls ? "★" : rankOf[d]) + "</td>";
     html += '<td><a class="domain-link" href="https://' + esc(d) + '" target="_blank" rel="noopener noreferrer">' + esc(d) + "</a></td>";
     html += "<td>" + ipHtml(d) + "</td>";
+    html += "<td>" + geoHtml(d) + "</td>";
     html += "<td>" + cfHtml(d) + "</td>";
     html += "<td>" + latHtml(d) + "</td>";
     html += "<td>" + statusHtml(d) + "</td>";
@@ -687,6 +790,7 @@ function render() {
   });
   tbody.innerHTML = html;
   updateStats();
+  refreshGeo().catch(() => {}); // 异步补查归属地，不阻塞渲染
 }
 
 // ---- 控件初始化 ----
@@ -740,7 +844,7 @@ window.addEventListener("error", (e) => {
   ].filter(Boolean).join(" / ");
   const msg = "JS 运行时错误：" + details;
   setInfo(msg);
-  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="6" class="empty err">' + msg + "</td></tr>";
+  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="7" class="empty err">' + msg + "</td></tr>";
 });
 window.addEventListener("unhandledrejection", (e) => {
   console.error(e);
@@ -752,7 +856,7 @@ window.addEventListener("unhandledrejection", (e) => {
   ].filter(Boolean).join(" / ");
   const msg = "未处理的 Promise 错误：" + details;
   setInfo(msg);
-  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="6" class="empty err">' + msg + "</td></tr>";
+  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="7" class="empty err">' + msg + "</td></tr>";
 });
 
 loadDomains();
@@ -884,6 +988,9 @@ export function html(version) {
   tr.row:hover { background: rgba(188,207,228,0.22); }
   tbody tr { content-visibility: auto; contain-intrinsic-size: 0 44px; }
   .lat { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .geo { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .geo-loading { color: #94a3b8; font-weight: 400; }
+  .geo-unknown { color: #94a3b8; }
   .ok { color: var(--good); }
   .timeout { color: var(--warn); }
   .err { color: var(--bad); }
@@ -969,13 +1076,14 @@ export function html(version) {
         <th class="rank">#</th>
         <th data-sort="domain">域名</th>
         <th data-sort="ip">IP（前 3）</th>
+        <th data-sort="geo">国家</th>
         <th data-sort="cf">CF IP</th>
         <th data-sort="lat">延迟 (ms)</th>
         <th data-sort="status">状态</th>
       </tr>
     </thead>
     <tbody id="tbody">
-      <tr><td colspan="6" class="empty">加载中…</td></tr>
+      <tr><td colspan="7" class="empty">加载中…</td></tr>
     </tbody>
   </table>
 </div>
