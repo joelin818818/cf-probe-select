@@ -30,23 +30,6 @@
   CF 判定按 **30 个 IP 攒批**发送。
 - 域名列表由 Worker 从 GitHub raw 拉取，带 **120 秒缓存**（减少对 GitHub 的请求压力）；「刷新域名」按钮可手动重新拉取。
 
-### DNS 服务商
-
-除「本地」外，所有 DoH 均由浏览器直连发起（服务端不解析 DNS）。
-
-| 选项 | 地址 | 说明 |
-|---|---|---|
-| 本地（服务端 DNS） | — | Worker 边缘递归解析 |
-| 阿里 DoH | `dns.alidns.com/resolve` | 公共 DNS，直连可用 |
-| DNS.SB DoH | `doh.dns.sb/dns-query` | 亚洲节点 |
-| Cloudflare Gateway DoH | `<随机10位>.cloudflare-gateway.com/dns-query` | 子域每次打开网页随机生成 |
-| Google DoH | `dns.google/resolve` | 需网络可直连 dns.google |
-| 自定义 DoH | 自填 | 浏览器直连 |
-
-Cloudflare Gateway DoH 的子域在**每次打开网页时随机生成**（10 位小写字母 + 数字）。Gateway 的 DoH 端点接受任意子域，随机化可以避免固定地址长期暴露后被针对性限速。若随机到的子域恰好不可用，开始测速前的预检会自动换一个子域重试一次。
-
-内网自签 DoH：浏览器无法忽略证书错误，需先在浏览器手动信任该地址（直接打开并点「继续」），或用 Cloudflare Tunnel 暴露为受信 https。
-
 ### 域名列表地址
 
 网页从 `RAW_DOMAINS_URL` 指定的地址拉取 `cf_domains.txt`：
