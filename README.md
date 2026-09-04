@@ -27,7 +27,7 @@
 - 表头（域名 / IP / CF 判定 / 延迟 / 状态）均可点击切换排序。
 - 测速前统一预检所选 DNS 是否可用，不可用时弹窗提示。
 - 每个域名解析前 3 个 A 记录 IP，并用 Cloudflare 官方 IPv4 CIDR 判定是否落在 CF 段（`✓CF` / `✗非CF`）。
-  CF 判定按 **30 个 IP 攒批**发送，避免每个域名各发一次请求。
+  CF 判定按 **30 个 IP 攒批**发送。
 - 域名列表由 Worker 从 GitHub raw 拉取，带 **120 秒缓存**（减少对 GitHub 的请求压力）；「刷新域名」按钮可手动重新拉取。
 
 ### DNS 服务商
@@ -59,7 +59,7 @@ Cloudflare Gateway DoH 的子域在**每次打开网页时随机生成**（10 �
 
 ## 探测脚本
 
-由 GitHub Actions 定时运行，广度优先爬取外链、累积走 Cloudflare 的域名。
+由 GitHub Actions 定时运行（每天 UTC 06:30，约北京时间 14:30；也可在 Actions 页面手动 `workflow_dispatch` 触发），广度优先爬取外链、累积走 Cloudflare 的域名。同一工作流并发时只跑一个实例，避免并行覆盖 `cf_domains.txt`。
 
 ### 本地手动运行
 
@@ -68,13 +68,22 @@ pip install -r requirements.txt
 python cf_probe_select.py
 ```
 
-- 探测阶段：单源系统 DNS + CF IP 段硬过滤（不认 Server 头），CF IP 段用二分查找判定。
+- 探测阶段：单源系统 DNS + CF IP 段硬过滤（不认 Server 头）。
 - 落盘前：6 套 DoH（系统 / 腾讯 / 阿里 / DNS.SB / Cloudflare Gateway / Google）校验。
   判定规则：**解析失败的源直接忽略**，只有「成功解析的源」里出现非 CF IP 才剔除该域名；所有源都解析失败则视为域名失效并删除。
-- 解析结果缓存复用；全局 `requests.Session()` 复用连接；`get_registered_domain()` 用 `lru_cache` 缓存。
-- 探测与扩散并发执行（线程池 + 锁保护共享状态）。
 - 同一主域名最多保留 3 个子域名。
 - 总量上限 200：超出时主域配额从 3 依次收紧到 2、1；仍超限则在 Actions 内按「GitHub 机房 → CF 节点」延迟升序保留最快前 200（不可达沉底）。
+
+### 入库拦截（黑名单）
+
+探测每个候选域名时，依次做四道判定，命中任意一条即「仅扩散外链、不入库」——该域名仍作为发现新域名的跳板去爬它的外链，但不会写入 `cf_domains.txt`：
+
+- **巨型站**：根域属于 Big Tech（不入库，避免无意义地收录大厂站点）。
+- **黑产域名**：命中 Hagezi 黑名单（3 份：`gambling` / `tif` / `fake` onlydomains，运行前从 jsDelivr / GitHub 拉取）。
+- **黑产关键词**：命中 `blacklist_keywords.txt` 自建关键词黑名单（子串 / 边界匹配）。
+- **T5 风险域名**：子域前缀为 `staging` / `test` / `dev` / `demo` / `sandbox` / `preview` / `temp`，或域名含 8 位以上纯数字 / 哈希串。
+
+每次运行还会对已有列表再清洗一遍，剔除已落入上述黑名单的域名。
 
 `cf_domains.txt` 每行一个纯域名，由脚本自动维护，请勿手动编辑。文件头部含更新时间（北京时间与世界时间 UTC）。
 
@@ -112,8 +121,13 @@ python cf_probe_select.py
 
 | 文件 / 目录 | 作用 |
 |---|---|
-| `cf_probe_select.py` | GitHub Actions 探测脚本 |
-| `worker/worker.js` | Cloudflare Worker（托管前端 + 接口） |
+| `cf_probe_select.py` | 探测主脚本（GitHub Actions 定时运行） |
+| `requirements.txt` | 探测脚本的 Python 依赖 |
+| `blacklist_keywords.txt` | 自建关键词黑名单（命中则仅扩散外链、不入库） |
+| `cf_domains.txt` | 探测累积的域名列表（自动维护，勿手编） |
+| `worker/worker.js` | Cloudflare Worker 入口（托管前端页面 + 接口、拉取域名列表） |
+| `worker/page.js` | 前端测速逻辑（解析、CF 判定、两阶段测速、排序渲染） |
 | `wrangler.toml` | Worker 部署配置（根目录） |
-| `cf_domains.txt` | 探测累积的域名列表 |
-| `.github/workflows/` | 定时探测工作流 |
+| `.github/workflows/` | 定时探测工作流（GitHub Actions） |
+| `assets/` | README 截图等静态资源 |
+| `LICENSE` | 开源协议 |
