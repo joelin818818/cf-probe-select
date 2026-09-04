@@ -96,28 +96,46 @@ function resolveDohList(provider, customDoh) {
 }
 
 // ====================================================================
-// Cloudflare IP 段（缓存）
+// Cloudflare IP 段（缓存 + 硬编码兜底）
 // ====================================================================
-let CF_RANGES = null;
+const CF_RANGES_FALLBACK = [
+  "173.245.48.0/20",
+  "103.21.244.0/22",
+  "103.22.200.0/22",
+  "103.31.4.0/22",
+  "141.101.64.0/18",
+  "108.162.192.0/18",
+  "190.93.240.0/20",
+  "188.114.96.0/20",
+  "197.234.240.0/22",
+  "198.41.128.0/17",
+  "162.158.0.0/15",
+  "104.16.0.0/13",
+  "104.24.0.0/14",
+  "172.64.0.0/13",
+  "131.0.72.0/22",
+];
+let CF_RANGES = CF_RANGES_FALLBACK.slice();
 let CF_LOAD_TS = 0;
 const CF_TTL = 6 * 60 * 60 * 1000;
 
 async function getCfRanges() {
   const now = Date.now();
   if (CF_RANGES && now - CF_LOAD_TS < CF_TTL) return CF_RANGES;
-  let ranges = [];
   try {
     const r = await fetch("https://www.cloudflare.com/ips-v4", { cf: { cacheTtl: 3600 } });
     if (r.ok) {
       const t = await r.text();
-      ranges = t.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      CF_RANGES = ranges;
-      CF_LOAD_TS = now;
+      const ranges = t.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      if (ranges.length) {
+        CF_RANGES = ranges;
+        CF_LOAD_TS = now;
+      }
     }
   } catch (e) {
-    ranges = CF_RANGES || [];
+    // 拉取失败时继续使用内存中的段（初始为硬编码兜底），避免误判
   }
-  return ranges;
+  return CF_RANGES;
 }
 
 // 判断某 IPv4 是否落在 CF 网段（支持 a.b.c.d/n）
@@ -126,7 +144,7 @@ function ipToLong(ip) {
   return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3];
 }
 function isIpInCf(ip, ranges) {
-  if (!ranges || !ranges.length) return true; // 段未加载时放行
+  if (!ranges || !ranges.length) return false; // 段未加载时保守判为非 CF（当前有硬编码兜底，不会空）
   const long = ipToLong(ip);
   for (const cidr of ranges) {
     const [net, bits] = cidr.split("/");

@@ -85,7 +85,7 @@ async function loadDomains(attempt = 1) {
     ipMap = {}; stateMap = {}; orderIndex = {};
     domains.forEach((d, i) => {
       ipMap[d] = undefined;
-      stateMap[d] = { phase: "idle", lat: null, status: null };
+      stateMap[d] = { phase: "idle", lat: null, status: null, errSource: null };
       orderIndex[d] = i;
     });
     testing = false;
@@ -235,7 +235,9 @@ async function resolveOne(d) {
     const res = await fetch("/api/resolve?domain=" + encodeURIComponent(d) + "&provider=local", { cache: "no-store" });
     const data = await res.json();
     const list = (data.ips || []).slice(0, MAX_IPS).map((ip) => ({ ip, isCf: !!data.cf }));
-    ipMap[d] = list.length ? list : [];
+    ipMap[d] = list;
+    if (!list.length) stateMap[d].errSource = "resolve";
+    else if (!list.every((x) => x.isCf)) stateMap[d].errSource = "noncf";
     return list;
   }
 
@@ -246,10 +248,13 @@ async function resolveOne(d) {
     ips = await browserDohResolve(doh, d);
   } catch (e) {
     ips = [];
+    stateMap[d].errSource = "resolve";
   }
   // CF 判定交服务端（仅持有 CF 网段），浏览器不解析 DNS 判定
   const list = await markCf(ips.slice(0, MAX_IPS));
   ipMap[d] = list;
+  if (!list.length && !stateMap[d].errSource) stateMap[d].errSource = "resolve";
+  else if (list.length && !list.every((x) => x.isCf)) stateMap[d].errSource = "noncf";
   return list;
 }
 
@@ -369,7 +374,7 @@ async function startTest() {
   resolvedCount = 0; measuredCount = 0;
   for (const d of domains) {
     ipMap[d] = undefined;
-    stateMap[d] = { phase: "resolving", lat: null, status: "resolving", rounds: null, okRounds: 0, avg: null };
+    stateMap[d] = { phase: "resolving", lat: null, status: "resolving", rounds: null, okRounds: 0, avg: null, errSource: null };
   }
   render();
 
@@ -380,11 +385,11 @@ async function startTest() {
   setInfo("解析中…");
   const resolveTasks = domains.map((d) => async () => {
     if (stopRequested) return;
-    try { await resolveOne(d); } catch (e) { ipMap[d] = []; }
+    try { await resolveOne(d); } catch (e) { ipMap[d] = []; stateMap[d].errSource = "resolve"; }
     resolvedCount++;
     stateMap[d].phase = "resolved";
-    // 解析无 IP 时标记为失败，而不是显示"解析完成，待测速"
-    stateMap[d].status = (ipMap[d] && ipMap[d].length) ? "resolved" : "err";
+    // 解析无 IP 或非 CF 时标记为失败（后续跳过测速），否则显示"解析完成，待测速"
+    stateMap[d].status = stateMap[d].errSource ? "err" : "resolved";
     if (resolvedCount % RENDER_EVERY === 0 || resolvedCount === domains.length) {
       setInfo("解析 " + resolvedCount + "/" + domains.length + " · 测速 0/" + domains.length);
       render();
@@ -400,9 +405,10 @@ async function startTest() {
   measuredCount = 0;
   const coarseTasks = domains.map((d) => async () => {
     if (stopRequested) return;
-    // 无 IP 的域名直接跳过测速
-    if (!ipMap[d] || !ipMap[d].length) {
+    // 无 IP 或判定为非 CF 的域名直接跳过测速
+    if (!ipMap[d] || !ipMap[d].length || stateMap[d].errSource === "noncf") {
       stateMap[d].phase = "done";
+      if (!stateMap[d].errSource) stateMap[d].errSource = "resolve";
       stateMap[d].status = "err";
       measuredCount++;
       if (measuredCount % RENDER_EVERY === 0 || measuredCount === domains.length) {
@@ -416,8 +422,10 @@ async function startTest() {
     stateMap[d].stage = "coarse";
     try {
       applyMeasure(d, await measureOne(d, COARSE_ROUNDS));
+      if (stateMap[d].status === "err" && !stateMap[d].errSource) stateMap[d].errSource = "measure";
     } catch (e) {
       stateMap[d].status = "err";
+      if (!stateMap[d].errSource) stateMap[d].errSource = "measure";
     }
     stateMap[d].phase = "done";
     measuredCount++;
@@ -451,8 +459,10 @@ async function startTest() {
     stateMap[d].stage = "fine";
     try {
       applyMeasure(d, await measureOne(d, FINE_ROUNDS));
+      if (stateMap[d].status === "err" && !stateMap[d].errSource) stateMap[d].errSource = "measure";
     } catch (e) {
       stateMap[d].status = "err";
+      if (!stateMap[d].errSource) stateMap[d].errSource = "measure";
     }
     stateMap[d].phase = "done";
     fineDone++;
@@ -509,7 +519,12 @@ function latHtml(d) {
     if (s && s.phase === "resolved") return '<span class="status">解析完成，待测速</span>';
     return '<span class="badge">—</span>';
   }
-  if (s.status === "err") return '<span class="status err">解析失败</span>';
+  if (s.status === "err") {
+    if (s.errSource === "noncf") return '<span class="status err">非CF，跳过测速</span>';
+    if (s.errSource === "resolve") return '<span class="status err">解析失败</span>';
+    if (s.errSource === "measure") return '<span class="status err">测速失败</span>';
+    return '<span class="status err">失败</span>';
+  }
   if (s.phase === "measuring") return '<span class="status">测速中…</span>';
   if (!s.rounds) return '<span class="badge">—</span>';
   const roundStr = s.rounds.map((x) => {
