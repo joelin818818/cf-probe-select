@@ -53,12 +53,13 @@
 
 - 每个域名解析前 3 个 A 记录 IP，用 Cloudflare 官方 IPv4 CIDR 判定是否落在 CF 段；
 - CF 判定按 30 个 IP 攒批发送；
-- 域名列表由 Worker 从 GitHub raw 拉取，带 120 秒缓存，「刷新域名」按钮可手动重新拉取。
+- 域名列表由 Worker 拉取，优先走 GitHub raw，失败时自动回退 jsDelivr / gitmirror 镜像；带 120 秒缓存，「刷新域名」按钮可手动重新拉取。
 
 ### 域名列表地址
 
 网页从 `RAW_DOMAINS_URL` 指定的地址拉取 `cf_domains.txt`：
 - 优先读取 `wrangler.toml` 的 `[vars] RAW_DOMAINS_URL`；
+- 主源失败时自动回退 jsDelivr（`cdn.jsdelivr.net`）与 gitmirror（`raw.gitmirror.com`）镜像；
 - 未配置时回退代码内默认值；
 - fork 后 GitHub Actions 自动把该地址改写为当前仓库地址并提交。
 

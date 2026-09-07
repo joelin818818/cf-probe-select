@@ -220,6 +220,24 @@ async function testDoh(doh) {
 // ====================================================================
 const DEFAULT_RAW_DOMAINS_URL = "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt";
 
+// 根据 raw.githubusercontent.com 主 URL 生成备用镜像 URL（jsDelivr / gitmirror）
+function makeRawUrlCandidates(rawUrl) {
+  const list = [rawUrl];
+  try {
+    const u = new URL(rawUrl);
+    if (u.hostname === "raw.githubusercontent.com") {
+      const parts = u.pathname.split("/").filter(Boolean);
+      const [owner, repo, branch, ...pathParts] = parts;
+      if (owner && repo && branch && pathParts.length) {
+        const path = pathParts.join("/");
+        list.push(`https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}/${path}`);
+        list.push(`https://raw.gitmirror.com/${owner}/${repo}/${branch}/${path}`);
+      }
+    }
+  } catch (e) {}
+  return list;
+}
+
 function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
     status,
@@ -236,6 +254,7 @@ const DOMAINS_CACHE_TTL = 120 * 1000;
 
 // 读取域名列表（带 120 秒缓存，用 Cache API 实现跨请求命中；不可用时降级为每次回源）。
 async function fetchDomainsCached(rawUrl) {
+  const urls = makeRawUrlCandidates(rawUrl);
   const cacheKey = "https://domains.cache.local/" + encodeURIComponent(rawUrl);
   let cache = null;
   try {
@@ -251,53 +270,56 @@ async function fetchDomainsCached(rawUrl) {
     cache = null; // Cache API 不可用则降级为不缓存
   }
 
-  // 回源：加时间戳绕过 raw.githubusercontent.com 的 CDN 缓存
-  const nocacheUrl = rawUrl + "?t=" + Date.now();
-  let res;
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 10000);
-    res = await fetch(nocacheUrl, { cf: { cacheTtl: 0 }, signal: ctrl.signal });
-    clearTimeout(t);
-  } catch (e) {
-    const err = new Error("读取域名列表超时，请重试");
-    err.status = 504;
-    throw err;
-  }
-  if (!res.ok) {
-    const err = new Error("无法读取域名列表");
-    err.status = 502;
-    throw err;
-  }
-
-  const text = await res.text();
-  const lines = text.split(/\r?\n/).map((l) => l.trim());
-  // 解析头部更新时间（如：# 更新时间：北京时间 2026-08-25 12:14:05 / 世界时间(UTC) ...）
-  let updatedAt = "";
-  for (const l of lines) {
-    if (l.startsWith("# 更新时间：")) {
-      updatedAt = l.slice("# 更新时间：".length).trim();
-      break;
-    }
-  }
-  const domains = lines
-    .filter((l) => l && !l.startsWith("#"))
-    .map((l) => l.split("#")[0].trim().toLowerCase());
-  const data = { domains, updatedAt, __cachedAt: Date.now() };
-
-  if (cache) {
+  const errors = [];
+  for (const url of urls) {
+    const nocacheUrl = url + "?t=" + Date.now();
+    let res;
     try {
-      await cache.put(
-        cacheKey,
-        new Response(JSON.stringify(data), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-        })
-      );
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 10000);
+      res = await fetch(nocacheUrl, { cf: { cacheTtl: 0 }, signal: ctrl.signal });
+      clearTimeout(t);
     } catch (e) {
-      // 写缓存失败不影响本次响应
+      errors.push(url + " => timeout");
+      continue;
     }
+    if (!res.ok) {
+      errors.push(url + " => HTTP " + res.status);
+      continue;
+    }
+
+    const text = await res.text();
+    const lines = text.split(/\r?\n/).map((l) => l.trim());
+    let updatedAt = "";
+    for (const l of lines) {
+      if (l.startsWith("# 更新时间：")) {
+        updatedAt = l.slice("# 更新时间：".length).trim();
+        break;
+      }
+    }
+    const domains = lines
+      .filter((l) => l && !l.startsWith("#"))
+      .map((l) => l.split("#")[0].trim().toLowerCase());
+    const data = { domains, updatedAt, __cachedAt: Date.now() };
+
+    if (cache) {
+      try {
+        await cache.put(
+          cacheKey,
+          new Response(JSON.stringify(data), {
+            headers: { "content-type": "application/json; charset=utf-8" },
+          })
+        );
+      } catch (e) {
+        // 写缓存失败不影响本次响应
+      }
+    }
+    return { data, cached: false };
   }
-  return { data, cached: false };
+
+  const err = new Error("无法读取域名列表: " + errors.join("; "));
+  err.status = 502;
+  throw err;
 }
 
 export default {
