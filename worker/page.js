@@ -67,7 +67,7 @@ async function loadDomains(attempt = 1) {
   let t;
   try {
     $("src").textContent = "数据源：GitHub 自动探测累积（实时）· 加载中…";
-    $("tbody").innerHTML = '<tr><td colspan="7" class="empty">加载中…' + (attempt > 1 ? "（第 " + attempt + " 次重试）" : "") + "</td></tr>";
+    $("tbody").innerHTML = '<tr><td colspan="6" class="empty">加载中…' + (attempt > 1 ? "（第 " + attempt + " 次重试）" : "") + "</td></tr>";
     const ctrl = new AbortController();
     t = setTimeout(() => ctrl.abort(), 15000);
     const r = await fetch("/api/domains", { cache: "no-store", signal: ctrl.signal });
@@ -102,7 +102,7 @@ async function loadDomains(attempt = 1) {
       setTimeout(() => loadDomains(attempt + 1), 2000);
     } else {
       $("src").textContent = "数据源：GitHub 自动探测累积（加载失败，请刷新重试）";
-      $("tbody").innerHTML = '<tr><td colspan="7" class="empty">加载失败：' + e.message +
+      $("tbody").innerHTML = '<tr><td colspan="6" class="empty">加载失败：' + e.message +
         ' <button id="retryLoad" class="ghost">重试加载</button></td></tr>';
       $("start").disabled = false;
       const btn = $("retryLoad");
@@ -513,202 +513,6 @@ function ipHtml(domain) {
   }).join(" · ") + "</span>";
 }
 
-// ===== IP 归属地查询（浏览器端直连第三方 API，避免服务端出站触发限额）=====
-// 仅查每个域名的「第一个 IP」即可满足归属地展示需求。
-// 主用 ipwho.is，备用 freeipapi.com；同 IP 仅查一次（GEO_CACHE 去重）。
-const GEO_CACHE = {}; // ip -> { code, name }
-
-// ISO 3166-1 alpha-2 → 中文名（全量）
-const COUNTRY_CN = {
-  "AD":"安道尔","AE":"阿联酋","AF":"阿富汗","AG":"安提瓜和巴布达","AI":"安圭拉","AL":"阿尔巴尼亚","AM":"亚美尼亚","AO":"安哥拉","AQ":"南极洲","AR":"阿根廷","AS":"美属萨摩亚","AT":"奥地利","AU":"澳大利亚","AW":"阿鲁巴","AX":"奥兰群岛","AZ":"阿塞拜疆",
-  "BA":"波斯尼亚和黑塞哥维那","BB":"巴巴多斯","BD":"孟加拉国","BE":"比利时","BF":"布基纳法索","BG":"保加利亚","BH":"巴林","BI":"布隆迪","BJ":"贝宁","BL":"圣巴泰勒米","BM":"百慕大","BN":"文莱","BO":"玻利维亚","BQ":"荷兰加勒比区","BR":"巴西","BS":"巴哈马","BT":"不丹","BV":"布韦岛","BW":"博茨瓦纳","BY":"白俄罗斯","BZ":"伯利兹",
-  "CA":"加拿大","CC":"科科斯（基林）群岛","CD":"刚果（金）","CF":"中非共和国","CG":"刚果（布）","CH":"瑞士","CI":"科特迪瓦","CK":"库克群岛","CL":"智利","CM":"喀麦隆","CN":"中国","CO":"哥伦比亚","CR":"哥斯达黎加","CU":"古巴","CV":"佛得角","CW":"库拉索","CX":"圣诞岛","CY":"塞浦路斯","CZ":"捷克",
-  "DE":"德国","DJ":"吉布提","DK":"丹麦","DM":"多米尼克","DO":"多米尼加","DZ":"阿尔及利亚",
-  "EC":"厄瓜多尔","EE":"爱沙尼亚","EG":"埃及","EH":"西撒哈拉","ER":"厄立特里亚","ES":"西班牙","ET":"埃塞俄比亚","EU":"欧盟",
-  "FI":"芬兰","FJ":"斐济","FK":"福克兰群岛（马尔维纳斯）","FM":"密克罗尼西亚","FO":"法罗群岛","FR":"法国",
-  "GA":"加蓬","GB":"英国","GD":"格林纳达","GE":"格鲁吉亚","GF":"法属圭亚那","GG":"根西岛","GH":"加纳","GI":"直布罗陀","GL":"格陵兰","GM":"冈比亚","GN":"几内亚","GP":"瓜德罗普","GQ":"赤道几内亚","GR":"希腊","GS":"南乔治亚和南桑威奇群岛","GT":"危地马拉","GU":"关岛","GW":"几内亚比绍","GY":"圭亚那",
-  "HK":"中国香港","HM":"赫德岛和麦克唐纳群岛","HN":"洪都拉斯","HR":"克罗地亚","HT":"海地","HU":"匈牙利",
-  "ID":"印度尼西亚","IE":"爱尔兰","IL":"以色列","IM":"马恩岛","IN":"印度","IO":"英属印度洋领地","IQ":"伊拉克","IR":"伊朗","IS":"冰岛","IT":"意大利",
-  "JE":"泽西岛","JM":"牙买加","JO":"约旦","JP":"日本",
-  "KE":"肯尼亚","KG":"吉尔吉斯斯坦","KH":"柬埔寨","KI":"基里巴斯","KM":"科摩罗","KN":"圣基茨和尼维斯","KP":"朝鲜","KR":"韩国","KW":"科威特","KY":"开曼群岛","KZ":"哈萨克斯坦",
-  "LA":"老挝","LB":"黎巴嫩","LC":"圣卢西亚","LI":"列支敦士登","LK":"斯里兰卡","LR":"利比里亚","LS":"莱索托","LT":"立陶宛","LU":"卢森堡","LV":"拉脱维亚","LY":"利比亚",
-  "MA":"摩洛哥","MC":"摩纳哥","MD":"摩尔多瓦","ME":"黑山","MF":"圣马丁（法属）","MG":"马达加斯加","MH":"马绍尔群岛","MK":"北马其顿","ML":"马里","MM":"缅甸","MN":"蒙古","MO":"中国澳门","MP":"北马里亚纳群岛","MQ":"马提尼克","MR":"毛里塔尼亚","MS":"蒙特塞拉特","MT":"马耳他","MU":"毛里求斯","MV":"马尔代夫","MW":"马拉维","MX":"墨西哥","MY":"马来西亚","MZ":"莫桑比克",
-  "NA":"纳米比亚","NC":"新喀里多尼亚","NE":"尼日尔","NF":"诺福克岛","NG":"尼日利亚","NI":"尼加拉瓜","NL":"荷兰","NO":"挪威","NP":"尼泊尔","NR":"瑙鲁","NU":"纽埃","NZ":"新西兰",
-  "OM":"阿曼",
-  "PA":"巴拿马","PE":"秘鲁","PF":"法属波利尼西亚","PG":"巴布亚新几内亚","PH":"菲律宾","PK":"巴基斯坦","PL":"波兰","PM":"圣皮埃尔和密克隆","PN":"皮特凯恩群岛","PR":"波多黎各","PS":"巴勒斯坦","PT":"葡萄牙","PW":"帕劳","PY":"巴拉圭",
-  "QA":"卡塔尔",
-  "RE":"留尼汪","RO":"罗马尼亚","RS":"塞尔维亚","RU":"俄罗斯","RW":"卢旺达",
-  "SA":"沙特阿拉伯","SB":"所罗门群岛","SC":"塞舌尔","SD":"苏丹","SE":"瑞典","SG":"新加坡","SH":"圣赫勒拿","SI":"斯洛文尼亚","SJ":"斯瓦尔巴和扬马延","SK":"斯洛伐克","SL":"塞拉利昂","SM":"圣马力诺","SN":"塞内加尔","SO":"索马里","SR":"苏里南","SS":"南苏丹","ST":"圣多美和普林西比","SV":"萨尔瓦多","SX":"圣马丁（荷属）","SY":"叙利亚","SZ":"斯威士兰",
-  "TA":"特里斯坦-达库尼亚","TC":"特克斯和凯科斯群岛","TD":"乍得","TF":"法属南方领地","TG":"多哥","TH":"泰国","TJ":"塔吉克斯坦","TK":"托克劳","TL":"东帝汶","TM":"土库曼斯坦","TN":"突尼斯","TO":"汤加","TR":"土耳其","TT":"特立尼达和多巴哥","TV":"图瓦卢","TW":"中国台湾",
-  "TZ":"坦桑尼亚",
-  "UA":"乌克兰","UG":"乌干达","UM":"美国本土外小岛屿","US":"美国","UY":"乌拉圭","UZ":"乌兹别克斯坦",
-  "VA":"梵蒂冈","VC":"圣文森特和格林纳丁斯","VE":"委内瑞拉","VG":"英属维尔京群岛","VI":"美属维尔京群岛","VN":"越南","VU":"瓦努阿图",
-  "WF":"瓦利斯和富图纳","WS":"萨摩亚",
-  "XK":"科索沃",
-  "YE":"也门","YT":"马约特",
-  "ZA":"南非","ZM":"赞比亚","ZW":"津巴布韦"
-};
-
-// 归属地 API 并发信号量（按源单独限制，降低单源被限流概率）
-const GEO_SEM = { ipwho: 4, freeipapi: 3, ipapi: 3 };
-const GEO_WAITERS = { ipwho: [], freeipapi: [], ipapi: [] };
-function geoAcquire(source) {
-  const sem = GEO_SEM[source];
-  if (sem > 0) { GEO_SEM[source]--; return Promise.resolve(); }
-  return new Promise((resolve) => GEO_WAITERS[source].push(resolve));
-}
-function geoRelease(source) {
-  if (GEO_WAITERS[source].length) { const r = GEO_WAITERS[source].shift(); r(); }
-  else GEO_SEM[source]++;
-}
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
-async function fetchWithTimeout(url, opts = {}, timeout = 8000) {
-  const ctrl = new AbortController();
-  const id = setTimeout(() => ctrl.abort(), timeout);
-  try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
-  finally { clearTimeout(id); }
-}
-async function fetchJson(url, opts = {}, timeout = 8000) {
-  const r = await fetchWithTimeout(url, opts, timeout);
-  if (!r.ok) {
-    const err = new Error("HTTP " + r.status);
-    err.status = r.status;
-    throw err;
-  }
-  return r.json();
-}
-
-async function lookupCountry(ip) {
-  if (ip in GEO_CACHE) return GEO_CACHE[ip];
-
-  const markFail = () => {
-    const res = { code: "", name: "" };
-    GEO_CACHE[ip] = res;
-    return res;
-  };
-
-  // 主：ipwho.is
-  await geoAcquire("ipwho");
-  try {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const d = await fetchJson("https://ipwho.is/" + encodeURIComponent(ip), { cache: "no-store" }, 8000);
-        if (d && d.success !== false && (d.country_code || d.country)) {
-          const res = { code: d.country_code || "", name: d.country || "" };
-          GEO_CACHE[ip] = res;
-          return res;
-        }
-        break;
-      } catch (e) {
-        if (e.status === 429) { await sleep(1000 * (attempt + 1)); continue; }
-        break;
-      }
-    }
-  } finally { geoRelease("ipwho"); }
-
-  // 备 1：freeipapi.com
-  await geoAcquire("freeipapi");
-  try {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const d = await fetchJson("https://free.freeipapi.com/api/json/" + encodeURIComponent(ip), { cache: "no-store" }, 8000);
-        if (d && d.status !== "fail" && (d.countryCode || d.countryName)) {
-          const res = { code: d.countryCode || "", name: d.countryName || "" };
-          GEO_CACHE[ip] = res;
-          return res;
-        }
-        break;
-      } catch (e) {
-        if (e.status === 429) { await sleep(1000 * (attempt + 1)); continue; }
-        break;
-      }
-    }
-  } finally { geoRelease("freeipapi"); }
-
-  // 备 2：ipapi.co（HTTPS，CORS 友好）
-  await geoAcquire("ipapi");
-  try {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const d = await fetchJson("https://ipapi.co/" + encodeURIComponent(ip) + "/json/", { cache: "no-store" }, 8000);
-        if (d && d.error !== true && (d.country_code || d.country_name)) {
-          const res = { code: d.country_code || "", name: d.country_name || "" };
-          GEO_CACHE[ip] = res;
-          return res;
-        }
-        break;
-      } catch (e) {
-        if (e.status === 429) { await sleep(1000 * (attempt + 1)); continue; }
-        break;
-      }
-    }
-  } finally { geoRelease("ipapi"); }
-
-  return markFail();
-}
-
-// 渲染某域名的归属地（仅第一个 IP）
-function geoHtml(d) {
-  const list = ipMap[d];
-  if (!list || !list.length) return '<span class="badge">—</span>';
-  const ip = list[0].ip;
-  const cached = GEO_CACHE[ip];
-  if (cached) {
-    if (cached.code) {
-      const cn = COUNTRY_CN[cached.code] || "";
-      const label = cn || cached.code;
-      const title = (cn ? cn + " " : "") + cached.code + (cached.name && cached.name !== cn ? " · " + cached.name : "");
-      return '<span class="geo" title="' + esc(title) + '">' + esc(label) + "</span>";
-    }
-    return '<span class="geo geo-unknown">?</span>';
-  }
-  return '<span class="geo geo-loading" data-ip="' + esc(ip) + '">…</span>';
-}
-
-// 第一个 IP 的归属地排序键
-function geoKey(d) {
-  const list = ipMap[d] || [];
-  if (list.length && GEO_CACHE[list[0].ip] && GEO_CACHE[list[0].ip].code) return GEO_CACHE[list[0].ip].code;
-  return "";
-}
-
-// 扫描当前表格里尚未查询的归属地，异步补查并就地更新（不触发整表重渲染）
-async function refreshGeo() {
-  const spans = Array.from(document.querySelectorAll("#tbody .geo-loading"));
-  const todo = [];
-  const seen = new Set();
-  for (const sp of spans) {
-    const ip = sp.getAttribute("data-ip");
-    if (!ip || ip in GEO_CACHE || seen.has(ip)) continue;
-    seen.add(ip);
-    todo.push(ip);
-  }
-  if (!todo.length) return;
-  await Promise.all(todo.map(async (ip) => {
-    try {
-      const res = await lookupCountry(ip);
-      const sel = '#tbody .geo-loading[data-ip="' + (window.CSS && CSS.escape ? CSS.escape(ip) : ip) + '"]';
-      document.querySelectorAll(sel).forEach((s) => {
-        s.classList.remove("geo-loading");
-        if (res.code) {
-          const cn = COUNTRY_CN[res.code] || "";
-          s.textContent = cn || res.code;
-          s.title = (cn ? cn + " " : "") + res.code + (res.name && res.name !== cn ? " · " + res.name : "");
-        } else {
-          s.textContent = "?";
-          s.classList.add("geo-unknown");
-        }
-      });
-    } catch (e) {
-      const sel = '#tbody .geo-loading[data-ip="' + (window.CSS && CSS.escape ? CSS.escape(ip) : ip) + '"]';
-      document.querySelectorAll(sel).forEach((s) => {
-        s.classList.remove("geo-loading");
-        s.textContent = "?";
-        s.classList.add("geo-unknown");
-      });
-    }
-  }));
-}
 function latHtml(d) {
   const s = stateMap[d];
   if (!s || s.phase === "idle" || s.phase === "resolving" || (s.phase === "resolved" && s.status === "resolved")) {
@@ -785,7 +589,7 @@ function sortRows() {
     return vb - va;
   });
   else if (sortMode === "status") arr.sort((a, b) => ((stateMap[a] && stateMap[a].status) || "").localeCompare((stateMap[b] && stateMap[b].status) || ""));
-  else if (sortMode === "geo") arr.sort((a, b) => geoKey(a).localeCompare(geoKey(b)));
+
   else { // lat / score：两者口径一致，均按「阶段 → 成功率 → 平均延迟」排序
     arr.sort((a, b) => {
       const sa = stateMap[a], sb = stateMap[b];
@@ -864,7 +668,7 @@ function render() {
   const tbody = $("tbody");
   updateFilterInfo(rows.length, all.length);
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">' +
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">' +
       (all.length ? "没有符合筛选条件的域名" : "暂无数据") + "</td></tr>";
     updateStats();
     return;
@@ -878,7 +682,7 @@ function render() {
     html += '<td class="rank">' + (bestCls ? "★" : rankOf[d]) + "</td>";
     html += '<td><a class="domain-link" href="https://' + esc(d) + '" target="_blank" rel="noopener noreferrer">' + esc(d) + "</a></td>";
     html += "<td>" + ipHtml(d) + "</td>";
-    html += "<td>" + geoHtml(d) + "</td>";
+
     html += "<td>" + cfHtml(d) + "</td>";
     html += "<td>" + latHtml(d) + "</td>";
     html += "<td>" + statusHtml(d) + "</td>";
@@ -886,7 +690,7 @@ function render() {
   });
   tbody.innerHTML = html;
   updateStats();
-  refreshGeo().catch(() => {}); // 异步补查归属地，不阻塞渲染
+
 }
 
 // ---- 控件初始化 ----
@@ -940,7 +744,7 @@ window.addEventListener("error", (e) => {
   ].filter(Boolean).join(" / ");
   const msg = "JS 运行时错误：" + details;
   setInfo(msg);
-  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="7" class="empty err">' + msg + "</td></tr>";
+  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="6" class="empty err">' + msg + "</td></tr>";
 });
 window.addEventListener("unhandledrejection", (e) => {
   console.error(e);
@@ -952,7 +756,7 @@ window.addEventListener("unhandledrejection", (e) => {
   ].filter(Boolean).join(" / ");
   const msg = "未处理的 Promise 错误：" + details;
   setInfo(msg);
-  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="7" class="empty err">' + msg + "</td></tr>";
+  if ($("tbody")) $("tbody").innerHTML = '<tr><td colspan="6" class="empty err">' + msg + "</td></tr>";
 });
 
 loadDomains();
@@ -1084,9 +888,7 @@ export function html(version) {
   tr.row:hover { background: rgba(188,207,228,0.22); }
   tbody tr { content-visibility: auto; contain-intrinsic-size: 0 44px; }
   .lat { font-variant-numeric: tabular-nums; font-weight: 600; }
-  .geo { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .geo-loading { color: #94a3b8; font-weight: 400; }
-  .geo-unknown { color: #94a3b8; }
+
   .ok { color: var(--good); }
   .timeout { color: var(--warn); }
   .err { color: var(--bad); }
@@ -1172,14 +974,14 @@ export function html(version) {
         <th class="rank">#</th>
         <th data-sort="domain">域名</th>
         <th data-sort="ip">IP（前 3）</th>
-        <th data-sort="geo">国家</th>
+
         <th data-sort="cf">CF IP</th>
         <th data-sort="lat">延迟 (ms)</th>
         <th data-sort="status">状态</th>
       </tr>
     </thead>
     <tbody id="tbody">
-      <tr><td colspan="7" class="empty">加载中…</td></tr>
+      <tr><td colspan="6" class="empty">加载中…</td></tr>
     </tbody>
   </table>
 </div>
