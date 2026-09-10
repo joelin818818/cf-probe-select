@@ -59,10 +59,6 @@ export const DNS_PROVIDERS = Object.fromEntries(
   DNS_PROVIDER_LIST.map((p) => [p.key, p])
 );
 
-export function normalizeProviderKey(key) {
-  return DNS_PROVIDERS[key] ? key : "local";
-}
-
 // 生成 n 位「小写字母 + 数字」随机串，用作 Cloudflare Gateway DoH 的随机子域。
 // 每次渲染页面 / 每次服务端解析各生成一次，整页共用以保证预检与解析结果一致。
 export function randomGatewaySub(n = 10) {
@@ -95,26 +91,8 @@ function resolveDohList(provider, customDoh) {
   return list; // 非空表示浏览器直连模式（前端不调用此函数解析）
 }
 
-// ====================================================================
-// Cloudflare IP 段（缓存 + 硬编码兜底）
-// ====================================================================
-const CF_RANGES_FALLBACK = [
-  "173.245.48.0/20",
-  "103.21.244.0/22",
-  "103.22.200.0/22",
-  "103.31.4.0/22",
-  "141.101.64.0/18",
-  "108.162.192.0/18",
-  "190.93.240.0/20",
-  "188.114.96.0/20",
-  "197.234.240.0/22",
-  "198.41.128.0/17",
-  "162.158.0.0/15",
-  "104.16.0.0/13",
-  "104.24.0.0/14",
-  "172.64.0.0/13",
-  "131.0.72.0/22",
-];
+// Cloudflare IP 段兜底：唯一数据源见仓库根 cf_ranges.json（与 cf_probe_select.py 共用）
+import CF_RANGES_FALLBACK from "../cf_ranges.json";
 let CF_RANGES = CF_RANGES_FALLBACK.slice();
 let CF_LOAD_TS = 0;
 const CF_TTL = 6 * 60 * 60 * 1000;
@@ -199,18 +177,6 @@ async function dohResolve(domain, provider, customDoh) {
 async function resolveIps(domain, provider, customDoh) {
   const r = await dohResolve(domain, provider, customDoh);
   return { ips: r.ips.slice(0, 3), doh: r.doh, cf: r.cf, error: r.error || null };
-}
-
-// 测试某 DoH 是否可用（自定义地址确认前调用）
-async function testDoh(doh) {
-  if (!/^https:\/\//i.test(doh)) return { ok: false, msg: "仅支持 https:// 开头的 DoH 地址" };
-  try {
-    const r = await dohResolve("cloudflare.com", "custom", doh);
-    if (r.ips && r.ips.length) return { ok: true, ips: r.ips };
-    return { ok: false, msg: "解析无结果" };
-  } catch (e) {
-    return { ok: false, msg: String(e.message || e) };
-  }
 }
 
 // ====================================================================

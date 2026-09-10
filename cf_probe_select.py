@@ -1,6 +1,7 @@
 import bisect
 import html
 import ipaddress
+import json
 import os
 import random
 import re
@@ -48,7 +49,6 @@ WORKERS_LATENCY = 10                    # Actions 内部延迟测速并发数
 # ---- 网络超时（秒） ----
 LATENCY_TIMEOUT = 3                     # Actions 内部测速单域名超时
 HTTP_TIMEOUT_EXPAND = 6                 # 抓取页面提取外链的超时
-DNS_TIMEOUT_UDP = 5                     # UDP DNS 解析超时
 DNS_TIMEOUT_DOH = 5                     # DoH 解析超时
 CF_RANGES_TIMEOUT = 10                  # 拉取 Cloudflare 官方 IP 段的超时
 
@@ -79,24 +79,9 @@ def random_gateway_sub(n: int = GATEWAY_SUB_LEN) -> str:
 
 # ==================== 1. 核心配置 ====================
 
-# Cloudflare 官方 IPv4 CIDR 列表（启动时会拉取最新，失败则用此兜底）
-CF_IP_RANGES_FALLBACK = [
-    ipaddress.ip_network("173.245.48.0/20"),
-    ipaddress.ip_network("103.21.244.0/22"),
-    ipaddress.ip_network("103.22.200.0/22"),
-    ipaddress.ip_network("103.31.4.0/22"),
-    ipaddress.ip_network("141.101.64.0/18"),
-    ipaddress.ip_network("108.162.192.0/18"),
-    ipaddress.ip_network("190.93.240.0/20"),
-    ipaddress.ip_network("188.114.96.0/20"),
-    ipaddress.ip_network("197.234.240.0/22"),
-    ipaddress.ip_network("198.41.128.0/17"),
-    ipaddress.ip_network("162.158.0.0/15"),
-    ipaddress.ip_network("104.16.0.0/13"),
-    ipaddress.ip_network("104.24.0.0/14"),
-    ipaddress.ip_network("172.64.0.0/13"),
-    ipaddress.ip_network("131.0.72.0/22"),
-]
+# Cloudflare 官方 IPv4 CIDR 兜底列表：唯一数据源见仓库根 cf_ranges.json（与 worker/worker.js 共用）
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cf_ranges.json")) as _f:
+    CF_IP_RANGES_FALLBACK = [ipaddress.ip_network(c) for c in json.load(_f)]
 
 
 HEADERS = {
@@ -420,59 +405,6 @@ def resolve_ips(domain: str) -> list:
         return []
 
 
-def _build_dns_query(domain: str) -> bytes:
-    import struct
-    txn_id = 0x1234
-    flags = 0x0100
-    header = struct.pack(">HHHHHH", txn_id, flags, 1, 0, 0, 0)
-    qname = b""
-    for part in domain.split("."):
-        qname += bytes([len(part)]) + part.encode("ascii")
-    qname += b"\x00"
-    question = qname + struct.pack(">HH", 1, 1)
-    return header + question
-
-
-def _parse_dns_a_records(resp: bytes) -> list:
-    import struct
-    try:
-        _, _, qd, an = struct.unpack(">HHHH", resp[:12])
-        off = 12
-        for _ in range(qd):
-            while resp[off] != 0:
-                off += resp[off] + 1
-            off += 1
-            off += 4
-        ips = []
-        for _ in range(an):
-            if resp[off] & 0xC0 == 0xC0:
-                off += 2
-            else:
-                while resp[off] != 0:
-                    off += resp[off] + 1
-                off += 1
-            rtype, _, _, rdlen = struct.unpack(">HHIH", resp[off:off + 10])
-            off += 10
-            if rtype == 1 and rdlen == 4:
-                ips.append(".".join(str(b) for b in resp[off:off + 4]))
-            off += rdlen
-        return ips
-    except Exception:
-        return []
-
-
-def resolve_via_udp_dns(domain: str, server: str, timeout: int = DNS_TIMEOUT_UDP) -> list:
-    try:
-        query = _build_dns_query(domain)
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.settimeout(timeout)
-            s.sendto(query, (server, 53))
-            resp, _ = s.recvfrom(4096)
-        return _parse_dns_a_records(resp)
-    except Exception:
-        return []
-
-
 def resolve_via_doh(domain: str, base_url: str, timeout: int = DNS_TIMEOUT_DOH) -> list:
     try:
         url = base_url + "?name=" + domain + "&type=1"
@@ -505,9 +437,7 @@ DNS_RESOLVERS = [
 def resolve_ips_multi(domain: str) -> dict:
     def _one(item):
         name, kind, srv = item
-        if kind == "udp":
-            return (name, resolve_via_udp_dns(domain, srv) if srv else resolve_ips(domain))
-        return (name, resolve_via_doh(domain, srv))
+        return (name, resolve_ips(domain) if kind == "udp" else resolve_via_doh(domain, srv))
 
     result = {}
     with ThreadPoolExecutor(max_workers=len(DNS_RESOLVERS)) as ex:

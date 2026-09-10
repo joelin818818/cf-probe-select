@@ -32,8 +32,6 @@ let onlyCf = false;         // 仅显示判定为 CF 的域名
 let onlyOk = false;         // 仅显示测速可达的域名
 
 const $ = (id) => document.getElementById(id);
-const rankMap = { lat: "延迟", ip: "IP", cf: "CF", domain: "域名", status: "状态", score: "综合" };
-
 // 浏览器端本地函数：兼容旧 localStorage 中可能存的 "360" key，自动映射为新 key
 function normalizeProviderKey(key) {
   const valid = ["local","aliyun","dnssb","cf_gateway","google","custom"];

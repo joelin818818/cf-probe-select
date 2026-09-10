@@ -129,11 +129,42 @@ jobs:
               print("RAW_DOMAINS_URL and WORKER_VERSION already match, skip update")
           PY
 
+      - name: Refresh cf_ranges.json fallback
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+
+          # 拉取 Cloudflare 官方 IPv4 段，作为仓库兜底（cf_ranges.json 的唯一数据源）。
+          # 仅拉取成功且内容有变化时才覆盖；失败或相同则保留现有文件，避免无意义提交。
+          url = "https://www.cloudflare.com/ips-v4"
+          try:
+              with urllib.request.urlopen(url, timeout=30) as r:
+                  text = r.read().decode("utf-8")
+          except Exception as e:
+              print("[skip] 拉取 CF IP 段失败，保留现有 cf_ranges.json:", e)
+              raise SystemExit(0)
+
+          ranges = [ln.strip() for ln in text.splitlines() if ln.strip() and "/" in ln]
+          if not ranges:
+              print("[skip] 拉取结果为空，保留现有 cf_ranges.json")
+              raise SystemExit(0)
+
+          with open("cf_ranges.json", encoding="utf-8") as f:
+              cur = json.load(f)
+          if ranges == cur:
+              print("[skip] cf_ranges.json 已是最新，无需更新")
+              raise SystemExit(0)
+
+          with open("cf_ranges.json", "w", encoding="utf-8") as f:
+              json.dump(ranges, f, indent=2, ensure_ascii=False)
+          print(f"[ok] cf_ranges.json 已更新为 {len(ranges)} 条")
+          PY
+
       - name: Commit and push results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add cf_domains.txt wrangler.toml worker/worker.js
+          git add cf_domains.txt wrangler.toml worker/worker.js cf_ranges.json
           if [ -z "$(git status --porcelain)" ]; then
             echo "无变更，跳过提交"
           else

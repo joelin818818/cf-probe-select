@@ -116,7 +116,6 @@ python cf_probe_select.py
 | `WORKERS_LATENCY` | `10` | Actions 内部延迟测速并发数 |
 | `LATENCY_TIMEOUT` | `3` | Actions 内部测速单域名超时（秒） |
 | `HTTP_TIMEOUT_EXPAND` | `6` | 抓取页面提取外链的超时（秒） |
-| `DNS_TIMEOUT_UDP` | `5` | UDP DNS 解析超时（秒） |
 | `DNS_TIMEOUT_DOH` | `5` | DoH 解析超时（秒） |
 | `CF_RANGES_TIMEOUT` | `10` | 拉取 Cloudflare 官方 IP 段的超时（秒） |
 | `GATEWAY_SUB_LEN` | `10` | Cloudflare Gateway DoH 随机子域长度 |
