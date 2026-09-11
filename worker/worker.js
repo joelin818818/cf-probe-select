@@ -93,6 +93,8 @@ function resolveDohList(provider, customDoh) {
 
 // Cloudflare IP 段兜底：唯一数据源见仓库根 cf_ranges.json（与 cf_probe_select.py 共用）
 import CF_RANGES_FALLBACK from "../cf_ranges.json";
+// 优选端口池：唯一数据源见仓库根 cf_ports.json（与 cf_probe_select.py 共用）
+import IP_PORTS from "../cf_ports.json";
 let CF_RANGES = CF_RANGES_FALLBACK.slice();
 let CF_LOAD_TS = 0;
 const CF_TTL = 6 * 60 * 60 * 1000;
@@ -291,6 +293,13 @@ async function fetchDomainsCached(rawUrl) {
   throw err;
 }
 
+// 端口按条目确定性分配：同一链接永远得到同一结果，链接本身无需写入端口
+function portFor(item) {
+  let h = 5381;
+  for (let i = 0; i < item.length; i++) h = ((h * 33) ^ item.charCodeAt(i)) >>> 0;
+  return IP_PORTS.length ? IP_PORTS[h % IP_PORTS.length] : 0;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -373,7 +382,7 @@ export default {
       if (items.some((s) => s === ".." || !/^[A-Za-z0-9._-]+$/.test(s))) {
         return new Response("bad snapshot item", { status: 400 });
       }
-      return new Response(items.join("\n") + "\n", {
+      return new Response(items.map((s) => s + ":" + portFor(s)).join("\n") + "\n", {
         headers: {
           "content-type": "text/plain; charset=utf-8",
           "cache-control": "no-store, no-cache, must-revalidate, max-age=0",

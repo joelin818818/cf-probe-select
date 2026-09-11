@@ -1038,7 +1038,7 @@ export function html(version) {
       <input id="expUrl" type="text" readonly placeholder="点「生成」后在此显示链接">
       <button id="expCopy" class="ghost">复制</button>
     </div>
-    <div class="note">链接内容已冻结在地址里：以后 <code>cf_domains.txt</code> 或本页测速排序变化，都不会改变这个链接的内容（取当前排序中测速成功的域名）。</div>
+    <div class="note">链接内容已冻结在地址里：以后 <code>cf_domains.txt</code> 或本页测速排序变化，都不会改变这个链接的内容（取当前排序中测速成功的域名）。端口由服务器按条目自动分配，同一链接结果固定。</div>
     <div class="note">优选 IP：<a href="/ips.txt" target="_blank">/ips.txt</a> —— 由 GitHub Actions 在机房内部自己测速选出的最优 IP，每天自动更新，与本页浏览器测速结果无关。</div>
     <div class="row" style="justify-content:flex-end"><button id="expClose" class="ghost">关闭</button></div>
   </div>
