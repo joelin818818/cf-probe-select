@@ -138,7 +138,9 @@ jobs:
           # 仅拉取成功且内容有变化时才覆盖；失败或相同则保留现有文件，避免无意义提交。
           url = "https://www.cloudflare.com/ips-v4"
           try:
-              with urllib.request.urlopen(url, timeout=30) as r:
+              # 必须带 UA：Cloudflare 会拒绝 urllib 默认的 Python-urllib UA（403）
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; cf-probe-select)"})
+              with urllib.request.urlopen(req, timeout=30) as r:
                   text = r.read().decode("utf-8")
           except Exception as e:
               print("[skip] 拉取 CF IP 段失败，保留现有 cf_ranges.json:", e)

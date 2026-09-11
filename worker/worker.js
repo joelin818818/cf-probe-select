@@ -101,7 +101,10 @@ async function getCfRanges() {
   const now = Date.now();
   if (CF_RANGES && now - CF_LOAD_TS < CF_TTL) return CF_RANGES;
   try {
-    const r = await fetch("https://www.cloudflare.com/ips-v4", { cf: { cacheTtl: 3600 } });
+    const r = await fetch("https://www.cloudflare.com/ips-v4", {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; cf-probe-select)" },
+      cf: { cacheTtl: 3600 },
+    });
     if (r.ok) {
       const t = await r.text();
       const ranges = t.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
