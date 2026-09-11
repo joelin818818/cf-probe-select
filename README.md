@@ -7,6 +7,7 @@
 - **探测**：GitHub Actions 定时顺着网页外链自动发现走 Cloudflare CDN 的域名，累积写入 `cf_domains.txt`。
 - **测速**：Cloudflare Worker 提供网页，在你的浏览器侧对每个域名实时测速。
 - **优选**：按成功率与延迟动态排序，自行复制并使用最快的节点。
+- **优选 IP**：每次探测后额外产出 `ips.txt`（最优的若干 Cloudflare IP），供 edgetunnel 等工具的「自定义订阅 / API」直接拉取。
 
 ## 测速网页
 
@@ -52,6 +53,7 @@
 #### 数据来源
 
 - 每个域名解析前 3 个 A 记录 IP，用 Cloudflare 官方 IPv4 CIDR 判定是否落在 CF 段；
+- Cloudflare 官方 IPv4 CIDR 的唯一数据源是仓库根目录 `cf_ranges.json`，脚本与 Worker 共用；Actions 每次运行会拉取官方列表自动刷新；
 - CF 判定按 30 个 IP 攒批发送；
 - 域名列表由 Worker 拉取，优先走 GitHub raw，失败时自动回退 jsDelivr / gitmirror 镜像；带 120 秒缓存，「刷新域名」按钮可手动重新拉取。
 
@@ -103,10 +105,11 @@ python cf_probe_select.py
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `OUTPUT_FILE` | `cf_domains.txt` | 探测结果落盘文件名 |
+| `IPS_OUTPUT_FILE` | `ips.txt` | 优选 IP 落盘文件名（供 edgetunnel 等订阅） |
 | `BOOTSTRAP_SEEDS` | `["cloudflare.com"]` | 历史为空时的自举种子 |
 | `SEED_SAMPLE_SIZE` | `5` | 每轮从已有域名中随机抽取的种子数量 |
 | `MAX_SUBDOMAINS_PER_ROOT` | `3` | 同一主域名最多保留的子域数量 |
-| `MAX_NEW_PER_RUN` | `200` | 单轮最多新增的域名数（达到即提前结束） |
+| `MAX_NEW_PER_RUN` | `100` | 单轮最多新增的域名数（达到即提前结束） |
 | `TOTAL_CAP` | `200` | 落盘域名总量硬上限；超限先收紧主域配额，仍超限则按延迟截断 |
 | `PROBE_TIME_LIMIT` | `600` | 单轮探测时长上限（秒） |
 | `MAX_NEW_PER_PAGE` | `50` | 单个页面最多提取的外链域名数 |
@@ -114,16 +117,54 @@ python cf_probe_select.py
 | `WORKERS_PROBE` | `10` | 主探测（检测 + 外链扩散）并发数 |
 | `WORKERS_VERIFY` | `10` | 落盘前 CF 多源校验并发数 |
 | `WORKERS_LATENCY` | `10` | Actions 内部延迟测速并发数 |
+| `WORKERS_IP` | `20` | 优选 IP 测速并发数 |
 | `LATENCY_TIMEOUT` | `3` | Actions 内部测速单域名超时（秒） |
 | `HTTP_TIMEOUT_EXPAND` | `6` | 抓取页面提取外链的超时（秒） |
 | `DNS_TIMEOUT_DOH` | `5` | DoH 解析超时（秒） |
 | `CF_RANGES_TIMEOUT` | `10` | 拉取 Cloudflare 官方 IP 段的超时（秒） |
+| `IP_CONNECT_TIMEOUT` | `2` | 优选 IP 单轮建连/握手超时（秒） |
+| `TOP_IP_COUNT` | `8` | 写入 ips.txt 的优选 IP 数量 |
+| `IP_PRESELECT` | `30` | 粗筛阶段保留的候选 IP 数 |
+| `IP_ROUNDS` | `3` | 精测阶段每个 IP 的测速轮数 |
+| `IP_WEIGHTS` | `tcp 0.3 / tls 0.4 / ttfb 0.3` | 精测三项指标的评分权重 |
+| `IP_PORTS` | `[2053, 2083, 2087, 2096, 8443]` | 输出端口池，每个 IP 随机取一个 |
 | `GATEWAY_SUB_LEN` | `10` | Cloudflare Gateway DoH 随机子域长度 |
 
 > **调参提示**
 > - 调大 `TOTAL_CAP` 能让列表更全，但网页端测速耗时会随之线性增加。
 > - 调大 `WORKERS_*` 可加快探测，但过高可能触发目标站限流或被 GitHub Actions 网络限速。
 > - 调小 `PROBE_TIME_LIMIT` 可缩短单次运行时长，但每轮发现的新域名会变少。
+
+## 优选 IP（ips.txt）
+
+每次探测结束后，脚本会对落盘域名解析出的 Cloudflare IP 做两阶段测速，取最优的若干个写入 `ips.txt`，供 edgetunnel 等工具的「自定义订阅 / API」直接拉取。
+
+### 输出格式
+
+每行一个地址，端口从 Cloudflare 免费 HTTPS 端口中随机取一个，末尾为排名：
+
+```
+104.16.132.229:2053#优选-1
+172.64.144.162:8443#优选-2
+```
+
+### 测速方式
+
+1. **粗筛**：全部候选 IP 各做 1 次 TCP 建连，按 RTT 升序保留最快 30 个；
+2. **精测**：对这 30 个各测 3 轮，单轮在同一条连接上依次测 TCP 建连、TLS 握手、HTTP 首字节（TLS 用该 IP 对应的域名做 SNI 并校验证书）；
+3. **评分**：三项各自除以全场最优值归一化后加权求和（TCP 0.3 / TLS 0.4 / 首字节 0.3），成功率优先、评分升序，取前 8。
+
+### 订阅地址
+
+Worker 提供 `/ips.txt` 路由，实时从仓库拉取 `ips.txt` 并返回：
+
+```
+https://<你的 Worker 域名>/ips.txt
+```
+
+- 地址由 `RAW_DOMAINS_URL` 替换文件名得到，fork 后自动跟随当前仓库；
+- 主源失败时同样回退 jsDelivr / gitmirror 镜像；
+- 文件随每次 Actions 运行更新，无需重新部署 Worker。
 
 ## 文件结构
 
@@ -133,7 +174,9 @@ python cf_probe_select.py
 | `requirements.txt` | 探测脚本的 Python 依赖 |
 | `blacklist_keywords.txt` | 自建关键词黑名单（命中则仅扩散外链、不入库） |
 | `cf_domains.txt` | 探测累积的域名列表（自动维护，勿手编） |
-| `worker/worker.js` | Cloudflare Worker 入口（托管前端页面 + 接口、拉取域名列表） |
+| `ips.txt` | 优选 IP 列表（自动维护，勿手编；供 edgetunnel 等订阅） |
+| `cf_ranges.json` | Cloudflare 官方 IPv4 CIDR 兜底列表（Actions 自动刷新） |
+| `worker/worker.js` | Cloudflare Worker 入口（托管前端页面 + 接口、拉取域名列表与 ips.txt） |
 | `worker/page.js` | 前端测速逻辑（解析、CF 判定、两阶段测速、排序渲染） |
 | `wrangler.toml` | Worker 部署配置（根目录） |
 | `.github/workflows/` | 定时探测工作流（GitHub Actions） |
