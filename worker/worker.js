@@ -363,6 +363,24 @@ export default {
       return new Response("ips.txt 拉取失败: " + errors.join(" | "), { status: 502 });
     }
 
+    // 导出快照：/s/d1/d2/d3.txt，列表写在路径里，内容随链接永久冻结
+    if (path.startsWith("/s/")) {
+      const payload = path.slice(3);
+      if (!payload.endsWith(".txt")) return new Response("bad snapshot url", { status: 400 });
+      const items = payload.slice(0, -4).split("/").map((s) => s.trim()).filter(Boolean);
+      if (!items.length || items.length > 30) return new Response("bad snapshot items", { status: 400 });
+      // 只放行域名/IP 字符集，避免链接被当作任意文本外发
+      if (items.some((s) => s === ".." || !/^[A-Za-z0-9._-]+$/.test(s))) {
+        return new Response("bad snapshot item", { status: 400 });
+      }
+      return new Response(items.join("\n") + "\n", {
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store, no-cache, must-revalidate, max-age=0",
+        },
+      });
+    }
+
     if (path === "/api/resolve") {
       const domain = (url.searchParams.get("domain") || "").trim().toLowerCase();
       const provider = (url.searchParams.get("provider") || "local").trim();

@@ -502,6 +502,22 @@ function copyAll() {
   });
 }
 
+// 导出列表：当前排序中测速成功的域名，或其首个 IP
+function exportList() {
+  const kind = (document.querySelector("input[name=expKind]:checked") || {}).value || "domain";
+  const n = Math.max(1, Math.min(20, parseInt($("expCount").value, 10) || 20));
+  const ok = sortRows().filter((d) => stateMap[d] && stateMap[d].status === "ok");
+  return ok
+    .map((d) => (kind === "ip" ? ((ipMap[d] || [])[0] || {}).ip : d))
+    .filter(Boolean)
+    .slice(0, n);
+}
+// 内容写进 URL 路径：链接一旦生成即冻结，不受 cf_domains.txt 与排序变化影响
+function buildExportUrl() {
+  const items = exportList();
+  return items.length ? location.origin + "/s/" + items.join("/") + ".txt" : "";
+}
+
 function ipHtml(domain) {
   const list = ipMap[domain];
   if (!list || !list.length) return '<span class="badge">—</span>';
@@ -717,6 +733,19 @@ $("start").addEventListener("click", startTest);
 $("stop").addEventListener("click", stopTest);
 $("refresh").addEventListener("click", async () => { await loadDomains(); setInfo("已刷新域名列表"); });
 $("copyAll").addEventListener("click", copyAll);
+$("exportBtn").addEventListener("click", () => $("exportMask").classList.add("on"));
+$("expClose").addEventListener("click", () => $("exportMask").classList.remove("on"));
+$("exportMask").addEventListener("click", (e) => { if (e.target === $("exportMask")) $("exportMask").classList.remove("on"); });
+$("expGen").addEventListener("click", () => {
+  $("expUrl").value = buildExportUrl() || "暂无测速成功的域名，请先测速";
+});
+$("expCopy").addEventListener("click", () => {
+  if (!$("expUrl").value) return;
+  navigator.clipboard.writeText($("expUrl").value);
+  const old = $("expCopy").textContent;
+  $("expCopy").textContent = "已复制";
+  setTimeout(() => ($("expCopy").textContent = old), 1200);
+});
 $("provider").addEventListener("change", (e) => { saveProvider(e.target.value); updateCustomUI(); });
 $("customDoh").addEventListener("input", (e) => { saveCustomDoh(e.target.value); updateCustomUI(); });
 $("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parseInt(e.target.value, 10) || 16); });
@@ -918,6 +947,16 @@ export function html(version) {
   .best { color: var(--accent); font-weight: 700; }
   a.domain-link { color: var(--fg); text-decoration: none; font-weight: 500; }
   a.domain-link:hover { color: var(--accent-hover); text-decoration: underline; }
+  .mask { position: fixed; inset: 0; background: rgba(77,94,110,0.35); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .mask.on { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; width: min(580px, 92vw); box-shadow: 0 8px 28px rgba(89,107,128,0.18); }
+  .modal h3 { margin: 0 0 12px; font-size: 16px; color: var(--fg); }
+  .modal .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; font-size: 13px; color: var(--fg-muted); }
+  .modal .note { font-size: 12px; color: var(--fg-muted); line-height: 1.7; margin-top: 8px; }
+  .modal a { color: var(--accent); text-decoration: none; }
+  .modal a:hover { text-decoration: underline; }
+  .modal input[type=text] { flex: 1; min-width: 220px; background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font-size: 12px; }
+  .modal input[type=number] { width: 64px; background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -932,6 +971,7 @@ export function html(version) {
   <button id="stop" style="display:none">停止</button>
   <button id="refresh" class="ghost">刷新域名</button>
   <button id="copyAll" class="ghost">复制当前</button>
+  <button id="exportBtn" class="ghost">导出链接</button>
   <label>DNS 服务商
     <select id="provider">${options}</select>
   </label>
@@ -982,6 +1022,25 @@ export function html(version) {
       <tr><td colspan="6" class="empty">加载中…</td></tr>
     </tbody>
   </table>
+</div>
+
+<div class="mask" id="exportMask">
+  <div class="modal">
+    <h3>导出链接</h3>
+    <div class="row">
+      <label class="switch"><input type="radio" name="expKind" value="domain" checked> 域名</label>
+      <label class="switch"><input type="radio" name="expKind" value="ip"> 每个域名的首个 IP</label>
+      <label class="switch">数量 <input id="expCount" type="number" min="1" max="20" value="20"></label>
+      <button id="expGen">生成</button>
+    </div>
+    <div class="row">
+      <input id="expUrl" type="text" readonly placeholder="点「生成」后在此显示链接">
+      <button id="expCopy" class="ghost">复制</button>
+    </div>
+    <div class="note">链接内容已冻结在地址里：以后 <code>cf_domains.txt</code> 或本页测速排序变化，都不会改变这个链接的内容（取当前排序中测速成功的域名）。</div>
+    <div class="note">优选 IP：<a href="/ips.txt" target="_blank">/ips.txt</a> —— 由 GitHub Actions 在机房内部自己测速选出的最优 IP，每天自动更新，与本页浏览器测速结果无关。</div>
+    <div class="row" style="justify-content:flex-end"><button id="expClose" class="ghost">关闭</button></div>
+  </div>
 </div>
 
 <script>${frontendJs}</script>
