@@ -1007,7 +1007,7 @@ export function html(version) {
   <label title="粗筛后只对延迟最低的前 N 个域名做 3 轮精测">精测数量
     <input id="fineCount" type="number" min="1" max="400" value="50">
   </label>
-  <span class="status" id="info">DNS 解析除「本地」走服务端外，均由你的浏览器直连 DoH；测速分两阶段：先全量粗筛 1 轮快速排序，再对延迟最低的「精测数量」个域名测 3 轮（间隔 2 秒）取平均</span>
+  <span class="status" id="info" title="DNS 解析除「本地」走服务端外，均由浏览器直连 DoH">解析默认浏览器直连 DoH；测速先粗筛 1 轮，再对最快的精测 3 轮</span>
 </div>
 
 <div class="stats" id="stats">
@@ -1049,7 +1049,7 @@ export function html(version) {
     <h3>导出链接</h3>
     <div class="row">
       <label class="switch"><input type="radio" name="expKind" value="domain" checked> 域名</label>
-      <label class="switch"><input type="radio" name="expKind" value="ip"> 每个域名的首个 IP</label>
+      <label class="switch"><input type="radio" name="expKind" value="ip"> 首个 IP</label>
       <label class="switch">数量 <input id="expCount" type="number" min="1" max="20" value="20"></label>
       <button id="expGen">生成</button>
     </div>
@@ -1057,8 +1057,9 @@ export function html(version) {
       <input id="expUrl" type="text" readonly placeholder="点「生成」后在此显示链接">
       <button id="expCopy" class="ghost">复制</button>
     </div>
-    <div class="note">链接内容已冻结在地址里：以后 <code>cf_domains.txt</code> 或本页测速排序变化，都不会改变这个链接的内容（取当前排序中测速成功的域名）。端口由服务器按条目自动分配，同一链接结果固定；链接带签名，改动任一数值都会失效（不会给出能打开但不可用的内容）。</div>
-    <div class="note">优选 IP：<a href="/ips.txt" target="_blank">/ips.txt</a> —— 由 GitHub Actions 在机房内部自己测速选出的最优 IP，每天自动更新，与本页浏览器测速结果无关。</div>
+    <div class="note">内容已冻结，不受列表或排序变化影响。</div>
+    <div class="note">端口自动分配且固定；链接带签名，改动即失效。</div>
+    <div class="note">优选 IP：<a href="/ips.txt" target="_blank">/ips.txt</a>（GitHub Actions 每日自动更新）</div>
     <div class="row" style="justify-content:flex-end"><button id="expClose" class="ghost">关闭</button></div>
   </div>
 </div>
