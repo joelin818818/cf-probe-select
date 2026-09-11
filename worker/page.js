@@ -347,20 +347,20 @@ async function preflightCheck() {
   }
 
   if (noIps) {
-    alert("该 DoH 无法解析出 IP（可能地址不正确、网络被拦截，或浏览器 CORS 限制）：\\n" + lastDoh +
-      "\\n请更换其他 DNS 服务商或检查网络" + (canRotate ? "（已自动换过一次随机子域仍失败）" : ""));
+    alert("该 DoH 未解析出 IP：" + lastDoh +
+      "\\n请更换 DNS 服务商或检查网络" + (canRotate ? "（已换过一次子域仍失败）" : ""));
     return false;
   }
 
   let extra = "";
   if (provider === "custom") {
-    extra = "\\n（内网自签证书请先在浏览器手动信任该地址：直接打开 " + lastDoh + " 并点「继续」）";
+    extra = "\\n自签证书：先打开 " + lastDoh + " 手动信任";
   } else {
-    extra = "\\n提示：该公开 DoH 可能不返回 CORS 头（浏览器直连会被拦截）或当前网络不可达。可尝试「阿里 DoH」「本地」或自定义 DoH；部分公开 DoH（如 Google）需网络可直连其服务地址。";
+    extra = "\\n可换用「本地」或「阿里 DoH」";
   }
-  alert("该 DoH 连接失败（可能网络被拦截或浏览器 CORS 限制）：\\n" + lastDoh +
-    "\\n错误：" + (lastErr ? lastErr.message : "未知") + extra +
-    (canRotate ? "（已自动换过一次随机子域仍失败）" : ""));
+  alert("该 DoH 连接失败：" + lastDoh +
+    "\\n" + (lastErr ? lastErr.message : "未知错误") + extra +
+    (canRotate ? "（已换过一次子域仍失败）" : ""));
   return false;
 }
 
