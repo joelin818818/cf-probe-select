@@ -330,6 +330,36 @@ export default {
       }
     }
 
+    if (path === "/ips.txt") {
+      // ips.txt 与 cf_domains.txt 同目录，换文件名即可（fork 后自动跟随仓库地址）
+      const rawIpsUrl = ((env && env.RAW_DOMAINS_URL) || DEFAULT_RAW_DOMAINS_URL).replace(
+        /cf_domains\.txt$/,
+        "ips.txt"
+      );
+      const errors = [];
+      for (const u of makeRawUrlCandidates(rawIpsUrl)) {
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 10000);
+          const res = await fetch(u + "?t=" + Date.now(), { cf: { cacheTtl: 0 }, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) {
+            errors.push(u + " => HTTP " + res.status);
+            continue;
+          }
+          return new Response(await res.text(), {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+              "cache-control": "no-store, no-cache, must-revalidate, max-age=0",
+            },
+          });
+        } catch (e) {
+          errors.push(u + " => timeout");
+        }
+      }
+      return new Response("ips.txt 拉取失败: " + errors.join(" | "), { status: 502 });
+    }
+
     if (path === "/api/resolve") {
       const domain = (url.searchParams.get("domain") || "").trim().toLowerCase();
       const provider = (url.searchParams.get("provider") || "local").trim();

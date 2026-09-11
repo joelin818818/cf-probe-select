@@ -6,6 +6,7 @@ import os
 import random
 import re
 import socket
+import ssl
 import string
 import threading
 import time
@@ -26,6 +27,7 @@ warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # ---- 输出与种子 ----
 OUTPUT_FILE = "cf_domains.txt"          # 探测结果落盘文件名
+IPS_OUTPUT_FILE = "ips.txt"             # 优选 IP 落盘文件名（供 edgetunnel 自定义订阅拉取）
 BOOTSTRAP_SEEDS = ["cloudflare.com"]    # 历史为空时的自举种子
 
 # ---- 数量与配额 ----
@@ -45,12 +47,20 @@ BATCH_SIZE = 20                         # 每轮出队处理的域名数
 WORKERS_PROBE = 10                      # 主探测（检测 + 外链扩散）并发数
 WORKERS_VERIFY = 10                     # 落盘前 CF 多源校验并发数
 WORKERS_LATENCY = 10                    # Actions 内部延迟测速并发数
+WORKERS_IP = 20                         # 优选 IP 测速并发数
 
 # ---- 网络超时（秒） ----
 LATENCY_TIMEOUT = 3                     # Actions 内部测速单域名超时
+IP_CONNECT_TIMEOUT = 2                  # 优选 IP 单轮建连/握手超时
 HTTP_TIMEOUT_EXPAND = 6                 # 抓取页面提取外链的超时
 DNS_TIMEOUT_DOH = 5                     # DoH 解析超时
 CF_RANGES_TIMEOUT = 10                  # 拉取 Cloudflare 官方 IP 段的超时
+
+# ---- 优选 IP 测速（粗筛 TCP → 精测 TCP/TLS/首字节，加权评分）----
+TOP_IP_COUNT = 8                        # 写入 ips.txt 的优选 IP 数量
+IP_PRESELECT = 30                       # 粗筛阶段保留的候选 IP 数
+IP_ROUNDS = 3                           # 精测阶段每个 IP 的测速轮数
+IP_WEIGHTS = {"tcp": 0.3, "tls": 0.4, "ttfb": 0.3}   # 三项指标权重，归一化后加权求和，越小越优
 
 # ---- Cloudflare Gateway DoH 随机子域 ----
 # 每次运行随机生成 10 位「小写字母 + 数字」子域（Gateway 接受任意子域）。
@@ -568,6 +578,103 @@ def _trim_by_latency(saved: set, root_sub_count: defaultdict, cap: int) -> int:
     return len(keep)
 
 
+SSL_CONTEXT = ssl.create_default_context()
+
+
+def _tcp_once(ip):
+    try:
+        t0 = time.time()
+        with socket.create_connection((ip, 443), timeout=IP_CONNECT_TIMEOUT):
+            return time.time() - t0
+    except OSError:
+        return None
+
+
+def _probe_round(ip, host):
+    """单轮精测：TCP 建连 → TLS 握手 → HTTP 首字节，返回 (tcp, tls, ttfb) 秒；任一环节失败返回 None。"""
+    try:
+        t0 = time.time()
+        sock = socket.create_connection((ip, 443), timeout=IP_CONNECT_TIMEOUT)
+        tcp = time.time() - t0
+        t1 = time.time()
+        tls_sock = SSL_CONTEXT.wrap_socket(sock, server_hostname=host)
+        tls_sock.settimeout(IP_CONNECT_TIMEOUT)
+        tls = time.time() - t1
+        t2 = time.time()
+        tls_sock.sendall(f"HEAD / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n".encode())
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            chunk = tls_sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+        ttfb = time.time() - t2
+        tls_sock.close()
+        return tcp, tls, ttfb
+    except Exception:
+        return None
+
+
+def select_best_ips(saved: set):
+    """两阶段优选：TCP 粗筛出最快的 IP_PRESELECT 个，再对它们多轮精测（TCP/TLS/首字节），
+    成功率优先、加权评分升序，取前 TOP_IP_COUNT 个写入 ips.txt。"""
+    missing = [d for d in saved if not DOMAIN_IP_CACHE.get(d)]
+    if missing:
+        with ThreadPoolExecutor(max_workers=WORKERS_IP) as pool:
+            for d, ips in pool.map(lambda x: (x, resolve_ips(x)), missing):
+                DOMAIN_IP_CACHE[d] = ips
+
+    ip_host = {}
+    for d in saved:
+        for ip in DOMAIN_IP_CACHE.get(d, []):
+            if is_cloudflare_ip(ip):
+                ip_host.setdefault(ip, d)
+    if not ip_host:
+        print(f"[!] 无 CF 候选 IP，跳过 {IPS_OUTPUT_FILE} 生成")
+        return
+
+    def _coarse(kv):
+        ip, host = kv
+        return ip, host, _tcp_once(ip)
+
+    with ThreadPoolExecutor(max_workers=WORKERS_IP) as pool:
+        coarse = [c for c in pool.map(_coarse, sorted(ip_host.items())) if c[2] is not None]
+    coarse.sort(key=lambda c: c[2])
+    preselect = [(ip, host) for ip, host, _ in coarse[:IP_PRESELECT]]
+    print(f"[*] 优选 IP 粗筛：{len(ip_host)} 个候选，TCP 最快 {len(preselect)} 个进入精测")
+
+    def _fine(kv):
+        ip, host = kv
+        return ip, [r for r in (_probe_round(ip, host) for _ in range(IP_ROUNDS)) if r]
+
+    results = []
+    with ThreadPoolExecutor(max_workers=WORKERS_IP) as pool:
+        for ip, rounds in pool.map(_fine, preselect):
+            if rounds:
+                avg = {k: sum(r[i] for r in rounds) / len(rounds) for i, k in enumerate(("tcp", "tls", "ttfb"))}
+                results.append({"ip": ip, "ok": len(rounds), "avg": avg})
+    if not results:
+        print(f"[!] 精测全部失败，跳过 {IPS_OUTPUT_FILE} 生成")
+        return
+
+    best = {k: max(min(r["avg"][k] for r in results), 1e-6) for k in ("tcp", "tls", "ttfb")}
+    for r in results:
+        r["score"] = sum(IP_WEIGHTS[k] * (r["avg"][k] / best[k]) for k in IP_WEIGHTS)
+    results.sort(key=lambda r: (-r["ok"], r["score"], r["ip"]))
+
+    top = results[:TOP_IP_COUNT]
+    try:
+        with open(IPS_OUTPUT_FILE, "w", encoding="utf-8") as f:
+            for i, r in enumerate(top, 1):
+                f.write(f"{r['ip']}:443#优选-{i}\n")
+        h = top[0]
+        print(f"[*] 已写入 {len(top)} 个优选 IP -> {IPS_OUTPUT_FILE}（第 1 名 {h['ip']}"
+              f" 均 TCP {h['avg']['tcp'] * 1000:.0f}ms / TLS {h['avg']['tls'] * 1000:.0f}ms"
+              f" / 首字节 {h['avg']['ttfb'] * 1000:.0f}ms）")
+    except Exception as e:
+        print(f"[!] {IPS_OUTPUT_FILE} 写回失败: {e}")
+
+
 def extract_all_domains_deep(raw_content: str, base_url: str) -> set:
     domains = set()
     clean_text = html.unescape(raw_content)
@@ -773,6 +880,7 @@ def run_cf_explorer():
             list(pool.map(process_one, batch))
 
     _flush_all()
+    select_best_ips(saved)
     print("=" * 60)
     print(
         f"[!] 本轮结束：新增 {new_added} 个域名，文件总计 {len(saved)} 个"
