@@ -955,8 +955,9 @@ export function html(version) {
   .modal .note { font-size: 12px; color: var(--fg-muted); line-height: 1.7; margin-top: 8px; }
   .modal a { color: var(--accent); text-decoration: none; }
   .modal a:hover { text-decoration: underline; }
-  .modal input[type=text] { flex: 1; min-width: 220px; background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font-size: 12px; }
-  .modal input[type=number] { width: 64px; background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+  .modal input[type=text], .modal input[type=number] { height: 36px; box-sizing: border-box; background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  .modal input[type=text] { flex: 1; min-width: 220px; padding: 0 10px; font-size: 12px; }
+  .modal input[type=number] { width: 64px; padding: 0 8px; font-size: 13px; text-align: center; }
 </style>
 </head>
 <body>
