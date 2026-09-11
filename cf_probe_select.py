@@ -61,7 +61,8 @@ TOP_IP_COUNT = 8                        # 写入 ips.txt 的优选 IP 数量
 IP_PRESELECT = 30                       # 粗筛阶段保留的候选 IP 数
 IP_ROUNDS = 3                           # 精测阶段每个 IP 的测速轮数
 IP_WEIGHTS = {"tcp": 0.3, "tls": 0.4, "ttfb": 0.3}   # 三项指标权重，归一化后加权求和，越小越优
-IP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095]   # 输出端口池（Cloudflare 免费 HTTP 端口），每个 IP 随机取一个
+IP_PORTS = [8080, 8880, 2052, 2082, 2086, 2095,       # Cloudflare 免费 HTTP 端口（已排除 80）
+            2053, 2083, 2087, 2096, 8443]             # Cloudflare 免费 HTTPS 端口（已排除 443）
 
 # ---- Cloudflare Gateway DoH 随机子域 ----
 # 每次运行随机生成 10 位「小写字母 + 数字」子域（Gateway 接受任意子域）。
