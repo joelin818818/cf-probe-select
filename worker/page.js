@@ -155,16 +155,20 @@ async function flushCf() {
   cfFlushing = true;
   // 取快照：flush 期间新加入的 IP 归入下一批
   const waiters = cfWaiters.slice();
-  const batch = cfPending.slice();
+  const batch = [...new Set(cfPending)];
   cfWaiters = [];
   cfPending = [];
-  const uniq = [...new Set(batch)];
-  try {
-    const r = await fetch("/api/cf-check?ips=" + encodeURIComponent(uniq.join(",")), { cache: "no-store" });
-    const data = await r.json();
-    for (const ip of uniq) CF_CACHE[ip] = !!(data.cf && data.cf[ip]);
-  } catch (e) {
-    for (const ip of uniq) CF_CACHE[ip] = false;
+  // 后端单次最多 100 个 IP，超出部分会被丢弃（曾导致成片 CF IP 被误判为非 CF），故分块请求
+  for (let i = 0; i < batch.length; i += 100) {
+    const chunk = batch.slice(i, i + 100);
+    try {
+      const r = await fetch("/api/cf-check?ips=" + encodeURIComponent(chunk.join(",")), { cache: "no-store" });
+      const data = await r.json();
+      // 只信任后端明确给出的结果，缺失的保持未知（不写 false）
+      for (const ip of chunk) if (data.cf && ip in data.cf) CF_CACHE[ip] = !!data.cf[ip];
+    } catch (e) {
+      // 请求失败不写缓存：留作未知（按 CF 处理），避免整批误判为非 CF
+    }
   }
   cfFlushing = false;
   // 唤醒本批所有等待者
@@ -185,8 +189,8 @@ function scheduleCfFlush() {
 async function markCf(ips) {
   if (!ips.length) return [];
   const need = [...new Set(ips)].filter((ip) => !(ip in CF_CACHE));
-  // 全部命中缓存则直接返回
-  if (!need.length) return ips.map((ip) => ({ ip, isCf: CF_CACHE[ip] }));
+  // 全部命中缓存则直接返回（未知按 CF 处理，避免误判为非 CF）
+  if (!need.length) return ips.map((ip) => ({ ip, isCf: CF_CACHE[ip] !== false }));
 
   cfPending.push(...need);
   const done = new Promise((resolve) => cfWaiters.push(resolve));
@@ -196,7 +200,7 @@ async function markCf(ips) {
     scheduleCfFlush();
   }
   await done;
-  return ips.map((ip) => ({ ip, isCf: CF_CACHE[ip] }));
+  return ips.map((ip) => ({ ip, isCf: CF_CACHE[ip] !== false }));
 }
 
 // 取浏览器直连 DoH 地址（local 返回 null，由服务端解析）
