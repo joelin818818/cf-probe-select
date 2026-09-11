@@ -300,6 +300,22 @@ function portFor(item) {
   return IP_PORTS.length ? IP_PORTS[h % IP_PORTS.length] : 0;
 }
 
+// 导出链接签名：密钥只在服务端，签名不匹配即说明列表被改动
+async function signItems(env, items) {
+  if (!env || !env.SIGN_SECRET) return "";
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(env.SIGN_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(items.join("\n")));
+  let bin = "";
+  for (const b of new Uint8Array(sig)) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "").slice(0, 12);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -372,15 +388,21 @@ export default {
       return new Response("ips.txt 拉取失败: " + errors.join(" | "), { status: 502 });
     }
 
-    // 导出快照：/s/d1/d2/d3.txt，列表写在路径里，内容随链接永久冻结
+    // 导出快照：/s/d1/d2/d3/<签名>.txt，列表写在路径里，内容随链接永久冻结
     if (path.startsWith("/s/")) {
       const payload = path.slice(3);
       if (!payload.endsWith(".txt")) return new Response("bad snapshot url", { status: 400 });
-      const items = payload.slice(0, -4).split("/").map((s) => s.trim()).filter(Boolean);
+      const parts = payload.slice(0, -4).split("/").map((s) => s.trim()).filter(Boolean);
+      // 配了 SIGN_SECRET 时最后一段是签名；未配置则全部按条目处理（旧链接仍可用）
+      const sig = env && env.SIGN_SECRET ? (parts.pop() || "") : "";
+      const items = parts;
       if (!items.length || items.length > 30) return new Response("bad snapshot items", { status: 400 });
       // 只放行域名/IP 字符集，避免链接被当作任意文本外发
       if (items.some((s) => s === ".." || !/^[A-Za-z0-9._-]+$/.test(s))) {
         return new Response("bad snapshot item", { status: 400 });
+      }
+      if (env && env.SIGN_SECRET && sig !== (await signItems(env, items))) {
+        return new Response("snapshot signature mismatch", { status: 400 });
       }
       return new Response(items.map((s) => s + ":" + portFor(s)).join("\n") + "\n", {
         headers: {
@@ -388,6 +410,16 @@ export default {
           "cache-control": "no-store, no-cache, must-revalidate, max-age=0",
         },
       });
+    }
+
+    // 给导出列表签发签名：密钥只在服务端，客户端改不了
+    if (path === "/api/sign" && request.method === "POST") {
+      let body = null;
+      try { body = await request.json(); } catch (e) { return json({ error: "bad body" }, 400); }
+      const items = ((body && body.items) || []).map((s) => String(s).trim()).filter(Boolean);
+      if (!items.length || items.length > 30) return json({ error: "bad items" }, 400);
+      if (items.some((s) => s === ".." || !/^[A-Za-z0-9._-]+$/.test(s))) return json({ error: "bad item" }, 400);
+      return json({ sig: await signItems(env, items) });
     }
 
     if (path === "/api/resolve") {

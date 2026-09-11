@@ -513,9 +513,23 @@ function exportList() {
     .slice(0, n);
 }
 // 内容写进 URL 路径：链接一旦生成即冻结，不受 cf_domains.txt 与排序变化影响
-function buildExportUrl() {
+async function buildExportUrl() {
   const items = exportList();
-  return items.length ? location.origin + "/s/" + items.join("/") + ".txt" : "";
+  if (!items.length) return "";
+  // 向服务端取签名（未配置密钥时返回空串，链接保持无签名形式）
+  let sig = "";
+  try {
+    const r = await fetch("/api/sign", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ items: items }),
+    });
+    const j = await r.json();
+    sig = (j && j.sig) || "";
+  } catch (e) {
+    sig = "";
+  }
+  return location.origin + "/s/" + items.join("/") + (sig ? "/" + sig : "") + ".txt";
 }
 
 function ipHtml(domain) {
@@ -736,8 +750,9 @@ $("copyAll").addEventListener("click", copyAll);
 $("exportBtn").addEventListener("click", () => $("exportMask").classList.add("on"));
 $("expClose").addEventListener("click", () => $("exportMask").classList.remove("on"));
 $("exportMask").addEventListener("click", (e) => { if (e.target === $("exportMask")) $("exportMask").classList.remove("on"); });
-$("expGen").addEventListener("click", () => {
-  $("expUrl").value = buildExportUrl() || "暂无测速成功的域名，请先测速";
+$("expGen").addEventListener("click", async () => {
+  $("expUrl").value = "生成中…";
+  $("expUrl").value = (await buildExportUrl()) || "暂无测速成功的域名，请先测速";
 });
 $("expCopy").addEventListener("click", () => {
   if (!$("expUrl").value) return;
@@ -1038,7 +1053,7 @@ export function html(version) {
       <input id="expUrl" type="text" readonly placeholder="点「生成」后在此显示链接">
       <button id="expCopy" class="ghost">复制</button>
     </div>
-    <div class="note">链接内容已冻结在地址里：以后 <code>cf_domains.txt</code> 或本页测速排序变化，都不会改变这个链接的内容（取当前排序中测速成功的域名）。端口由服务器按条目自动分配，同一链接结果固定。</div>
+    <div class="note">链接内容已冻结在地址里：以后 <code>cf_domains.txt</code> 或本页测速排序变化，都不会改变这个链接的内容（取当前排序中测速成功的域名）。端口由服务器按条目自动分配，同一链接结果固定；链接带签名，改动任一数值都会失效（不会给出能打开但不可用的内容）。</div>
     <div class="note">优选 IP：<a href="/ips.txt" target="_blank">/ips.txt</a> —— 由 GitHub Actions 在机房内部自己测速选出的最优 IP，每天自动更新，与本页浏览器测速结果无关。</div>
     <div class="row" style="justify-content:flex-end"><button id="expClose" class="ghost">关闭</button></div>
   </div>
