@@ -7,7 +7,7 @@
 - **探测**：GitHub Actions 定时顺着网页外链自动发现走 Cloudflare CDN 的域名，累积写入 `cf_domains.txt`。
 - **测速**：Cloudflare Worker 提供网页，在你的浏览器侧对每个域名实时测速。
 - **优选**：按成功率与延迟动态排序，自行复制并使用最快的节点。
-- **优选 IP**：每次探测后额外产出 `ips.txt`（最优的若干 Cloudflare IP），供 edgetunnel 等工具的「自定义订阅 / API」直接拉取。
+- **优选 IP / 域名**：测速流程每 12 小时产出 `ips.txt`（最优的若干 Cloudflare IP）与 `best_domains.txt`（这些 IP 对应的域名），供 edgetunnel 等工具的「自定义订阅 / API」直接拉取。
 
 ## 测速网页
 
@@ -72,11 +72,14 @@
 
 由 GitHub Actions 定时运行（每天 UTC 06:30，约北京时间 14:30；也可在 Actions 页面手动 `workflow_dispatch` 触发），广度优先爬取外链、累积走 Cloudflare 的域名。同一工作流并发时只跑一个实例，避免并行覆盖 `cf_domains.txt`。
 
+优选测速独立在 `probe-speed.yml` 中运行，每 12 小时一次（UTC 00:30 / 12:30，约北京时间 08:30 / 20:30），读取 `cf_domains.txt` 产出 `ips.txt` 与 `best_domains.txt`。
+
 ### 本地手动运行
 
 ```bash
 pip install -r requirements.txt
-python cf_probe_select.py
+python cf_probe_select.py   # 只探测，更新 cf_domains.txt
+python probe_speed.py       # 只测速，更新 ips.txt / best_domains.txt
 ```
 
 - 探测阶段：单源系统 DNS + CF IP 段硬过滤（不认 Server 头）。
@@ -106,6 +109,7 @@ python cf_probe_select.py
 |---|---|---|
 | `OUTPUT_FILE` | `cf_domains.txt` | 探测结果落盘文件名 |
 | `IPS_OUTPUT_FILE` | `ips.txt` | 优选 IP 落盘文件名（供 edgetunnel 等订阅） |
+| `BEST_DOMAINS_OUTPUT_FILE` | `best_domains.txt` | 优选域名落盘文件名 |
 | `BOOTSTRAP_SEEDS` | `["cloudflare.com"]` | 历史为空时的自举种子 |
 | `SEED_SAMPLE_SIZE` | `5` | 每轮从已有域名中随机抽取的种子数量 |
 | `MAX_SUBDOMAINS_PER_ROOT` | `3` | 同一主域名最多保留的子域数量 |
@@ -135,17 +139,26 @@ python cf_probe_select.py
 > - 调大 `WORKERS_*` 可加快探测，但过高可能触发目标站限流或被 GitHub Actions 网络限速。
 > - 调小 `PROBE_TIME_LIMIT` 可缩短单次运行时长，但每轮发现的新域名会变少。
 
-## 优选 IP（ips.txt）
+## 优选 IP / 域名（ips.txt、best_domains.txt）
 
-每次探测结束后，脚本会对落盘域名解析出的 Cloudflare IP 做两阶段测速，取最优的若干个写入 `ips.txt`，供 edgetunnel 等工具的「自定义订阅 / API」直接拉取。
+测速流程对落盘域名解析出的 Cloudflare IP 做两阶段测速，写入 `ips.txt`（最优 IP）与 `best_domains.txt`（这些 IP 对应的域名），供 edgetunnel 等工具的「自定义订阅 / API」直接拉取。
 
 ### 输出格式
 
-每行一个地址，端口从 Cloudflare 免费 HTTPS 端口中随机取一个，末尾为排名：
+每行一条，端口从 Cloudflare 免费 HTTPS 端口中随机取一个，末尾为排名。
+
+`ips.txt`：
 
 ```
 104.16.132.229:2053#优选-1
 172.64.144.162:8443#优选-2
+```
+
+`best_domains.txt`：
+
+```
+example.com:8443#优选-1
+example.org:2053#优选-2
 ```
 
 ### 测速方式
@@ -156,10 +169,11 @@ python cf_probe_select.py
 
 ### 订阅地址
 
-Worker 提供 `/ips.txt` 路由，实时从仓库拉取 `ips.txt` 并返回：
+Worker 提供 `/ips.txt` 与 `/best_domains.txt` 路由，实时从仓库拉取同名文件并返回：
 
 ```
 https://<你的 Worker 域名>/ips.txt
+https://<你的 Worker 域名>/best_domains.txt
 ```
 
 - 地址由 `RAW_DOMAINS_URL` 替换文件名得到，fork 后自动跟随当前仓库；
@@ -171,14 +185,15 @@ https://<你的 Worker 域名>/ips.txt
 | 文件 / 目录 | 作用 |
 |---|---|
 | `cf_probe_select.py` | 探测主脚本（GitHub Actions 定时运行） |
+| `probe_speed.py` | 优选测速脚本（独立定时运行，产出 `ips.txt` / `best_domains.txt`） |
 | `requirements.txt` | 探测脚本的 Python 依赖 |
 | `blacklist_keywords.txt` | 自建关键词黑名单（命中则仅扩散外链、不入库） |
 | `cf_domains.txt` | 探测累积的域名列表（自动维护，勿手编） |
-| `ips.txt` | 优选 IP 列表（自动维护，勿手编；供 edgetunnel 等订阅） |
+| `ips.txt` / `best_domains.txt` | 优选 IP / 域名列表（自动维护，勿手编；供 edgetunnel 等订阅） |
 | `cf_ranges.json` | Cloudflare 官方 IPv4 CIDR 兜底列表（Actions 自动刷新） |
 | `worker/worker.js` | Cloudflare Worker 入口（托管前端页面 + 接口、拉取域名列表与 ips.txt） |
 | `worker/page.js` | 前端测速逻辑（解析、CF 判定、两阶段测速、排序渲染） |
 | `wrangler.toml` | Worker 部署配置（根目录） |
-| `.github/workflows/` | 定时探测工作流（GitHub Actions） |
+| `.github/workflows/` | 定时探测与测速工作流（GitHub Actions） |
 | `assets/` | README 截图等静态资源 |
 | `LICENSE` | 开源协议 |

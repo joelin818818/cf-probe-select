@@ -900,7 +900,6 @@ def run_cf_explorer():
             list(pool.map(process_one, batch))
 
     _flush_all()
-    select_best_ips(saved)
     print("=" * 60)
     print(
         f"[!] 本轮结束：新增 {new_added} 个域名，文件总计 {len(saved)} 个"
