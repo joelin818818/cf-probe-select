@@ -1,8 +1,8 @@
-ravimehta.substack.com:2087#优选-1
-www.cookieconsent.com:2083#优选-2
-www.nomios.com:8443#优选-3
-en.liberapay.com:2083#优选-4
-lovable.dev:8443#优选-5
-www.dot.ph:8443#优选-6
-www.gartner.com:2053#优选-7
-www.vmware.com:2083#优选-8
+discord.com:2083#优选-1
+www.glassdoor.com:2087#优选-2
+cdn.discordapp.com:2053#优选-3
+clerk.unavatar.io:2083#优选-4
+omnibvi.com:8443#优选-5
+www.iaemconference.org:2096#优选-6
+www.iana.org:2096#优选-7
+www.vonage.com:2053#优选-8
