@@ -765,6 +765,16 @@ $("expCopy").addEventListener("click", () => {
   $("expCopy").textContent = "已复制";
   setTimeout(() => ($("expCopy").textContent = old), 1200);
 });
+function bindCopyLink(id, path) {
+  $(id).addEventListener("click", () => {
+    navigator.clipboard.writeText(location.origin + path);
+    const b = $(id), old = b.textContent;
+    b.textContent = "已复制";
+    setTimeout(() => (b.textContent = old), 1200);
+  });
+}
+bindCopyLink("copyDomains", "/best_domains.txt");
+bindCopyLink("copyIps", "/ips.txt");
 $("provider").addEventListener("change", (e) => { saveProvider(e.target.value); updateCustomUI(); });
 $("customDoh").addEventListener("input", (e) => { saveCustomDoh(e.target.value); updateCustomUI(); });
 $("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parseInt(e.target.value, 10) || 16); });
@@ -1055,11 +1065,17 @@ export function html(version) {
     </div>
     <div class="row">
       <input id="expUrl" type="text" readonly placeholder="点「生成」后在此显示链接">
-      <button id="expCopy" class="ghost">复制</button>
+      <button id="expCopy" class="ghost">复制链接</button>
     </div>
     <div class="note">内容已冻结，不受列表或排序变化影响。</div>
     <div class="note">端口自动分配且固定；链接带签名，改动即失效。</div>
-    <div class="note">优选 IP：<a href="/ips.txt" target="_blank">/ips.txt</a>（GitHub Actions 每日自动更新）</div>
+    <div class="note">以下两项由 GitHub 服务器测速产出，每日自动更新（与本页浏览器测速无关）：</div>
+    <div class="row">
+      <span>域名结果 <a href="/best_domains.txt" target="_blank">/best_domains.txt</a></span>
+      <button id="copyDomains" class="ghost">复制链接</button>
+      <span>IP 结果 <a href="/ips.txt" target="_blank">/ips.txt</a></span>
+      <button id="copyIps" class="ghost">复制链接</button>
+    </div>
     <div class="row" style="justify-content:flex-end"><button id="expClose" class="ghost">关闭</button></div>
   </div>
 </div>

@@ -358,11 +358,12 @@ export default {
       }
     }
 
-    if (path === "/ips.txt") {
-      // ips.txt 与 cf_domains.txt 同目录，换文件名即可（fork 后自动跟随仓库地址）
+    // 优选结果文件：ips.txt（IP 结果）/ best_domains.txt（域名结果），与 cf_domains.txt 同目录
+    if (path === "/ips.txt" || path === "/best_domains.txt") {
+      const name = path.slice(1);
       const rawIpsUrl = ((env && env.RAW_DOMAINS_URL) || DEFAULT_RAW_DOMAINS_URL).replace(
         /cf_domains\.txt$/,
-        "ips.txt"
+        name
       );
       const errors = [];
       for (const u of makeRawUrlCandidates(rawIpsUrl)) {
@@ -385,7 +386,7 @@ export default {
           errors.push(u + " => timeout");
         }
       }
-      return new Response("ips.txt 拉取失败: " + errors.join(" | "), { status: 502 });
+      return new Response(name + " 拉取失败: " + errors.join(" | "), { status: 502 });
     }
 
     // 导出快照：/s/d1/d2/d3/<签名>.txt，列表写在路径里，内容随链接永久冻结

@@ -28,6 +28,7 @@ warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 # ---- 输出与种子 ----
 OUTPUT_FILE = "cf_domains.txt"          # 探测结果落盘文件名
 IPS_OUTPUT_FILE = "ips.txt"             # 优选 IP 落盘文件名（供 edgetunnel 自定义订阅拉取）
+BEST_DOMAINS_OUTPUT_FILE = "best_domains.txt"  # 优选域名落盘文件名（同一轮测速的域名结果）
 BOOTSTRAP_SEEDS = ["cloudflare.com"]    # 历史为空时的自举种子
 
 # ---- 数量与配额 ----
@@ -648,14 +649,15 @@ def select_best_ips(saved: set):
 
     def _fine(kv):
         ip, host = kv
-        return ip, [r for r in (_probe_round(ip, host) for _ in range(IP_ROUNDS)) if r]
+        rounds = [r for r in (_probe_round(ip, host) for _ in range(IP_ROUNDS)) if r]
+        return ip, host, rounds
 
     results = []
     with ThreadPoolExecutor(max_workers=WORKERS_IP) as pool:
-        for ip, rounds in pool.map(_fine, preselect):
+        for ip, host, rounds in pool.map(_fine, preselect):
             if rounds:
                 avg = {k: sum(r[i] for r in rounds) / len(rounds) for i, k in enumerate(("tcp", "tls", "ttfb"))}
-                results.append({"ip": ip, "ok": len(rounds), "avg": avg})
+                results.append({"ip": ip, "host": host, "ok": len(rounds), "avg": avg})
     if not results:
         print(f"[!] 精测全部失败，跳过 {IPS_OUTPUT_FILE} 生成")
         return
@@ -676,6 +678,21 @@ def select_best_ips(saved: set):
               f" / 首字节 {h['avg']['ttfb'] * 1000:.0f}ms）")
     except Exception as e:
         print(f"[!] {IPS_OUTPUT_FILE} 写回失败: {e}")
+
+    # 同一轮测速的域名结果：按排名取域名首次出现（= 该域名最好那个 IP 的排名），去重后编号
+    hosts = []
+    for r in results:
+        if r["host"] not in hosts:
+            hosts.append(r["host"])
+        if len(hosts) >= TOP_IP_COUNT:
+            break
+    try:
+        with open(BEST_DOMAINS_OUTPUT_FILE, "w", encoding="utf-8") as f:
+            for i, h in enumerate(hosts, 1):
+                f.write(f"{h}:{random.choice(IP_PORTS)}#优选-{i}\n")
+        print(f"[*] 已写入 {len(hosts)} 个优选域名 -> {BEST_DOMAINS_OUTPUT_FILE}")
+    except Exception as e:
+        print(f"[!] {BEST_DOMAINS_OUTPUT_FILE} 写回失败: {e}")
 
 
 def extract_all_domains_deep(raw_content: str, base_url: str) -> set:

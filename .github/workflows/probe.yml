@@ -166,7 +166,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add cf_domains.txt wrangler.toml worker/worker.js cf_ranges.json ips.txt
+          git add cf_domains.txt wrangler.toml worker/worker.js cf_ranges.json ips.txt best_domains.txt
           if [ -z "$(git status --porcelain)" ]; then
             echo "无变更，跳过提交"
           else
