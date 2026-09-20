@@ -1,0 +1,8 @@
+www.cnnindonesia.com:2053#优选-1
+www.iana.org:2096#优选-2
+kalaam-telecom.com:2083#优选-3
+www.manodaktaras.lt:2083#优选-4
+cdn.datatables.net:2053#优选-5
+services.digitalmatter.ai:2096#优选-6
+www.bootstrapcdn.com:2096#优选-7
+www.delfi.lt:2053#优选-8
