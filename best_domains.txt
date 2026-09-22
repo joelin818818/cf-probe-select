@@ -1,8 +1,8 @@
-www.nomios.fr:8443#优选-1
-docs.tuxcare.com:2083#优选-2
-www.ethicalads.io:2083#优选-3
-www.wpcharitable.com:8443#优选-4
-www.ziprecruiter.co.uk:2096#优选-5
-console.sendlayer.com:2083#优选-6
-cdn.adverge.ai:2083#优选-7
-esm.unpkg.com:2087#优选-8
+cdn.prod.website-files.com:2083#优选-1
+discord.com:2096#优选-2
+opensource.org:2083#优选-3
+analytics.ahrefs.com:8443#优选-4
+meet.jit.si:2087#优选-5
+io.narrative.io:2083#优选-6
+www.bootstrapcdn.com:2083#优选-7
+visser.com.au:2053#优选-8
