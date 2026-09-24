@@ -1,8 +1,8 @@
-cdn-cookieyes.com:2087#优选-1
-cdn.discordapp.com:8443#优选-2
-jsfiddle.net:8443#优选-3
-www.nomios.lu:2096#优选-4
-blackfriday.com:2096#优选-5
-rymera.com.au:2087#优选-6
-smashballoon.com:2096#优选-7
-www.monsterinsights.com:2083#优选-8
+www.lostroqueros.com:2087#优选-1
+discord.com:2096#优选-2
+www.ispring.com:2083#优选-3
+garajcloud.com:2096#优选-4
+hrc.zajil.com:2087#优选-5
+assets.calendly.com:2096#优选-6
+upwork.com:8443#优选-7
+www.starrydns.com:2053#优选-8
