@@ -1,8 +1,8 @@
-www.kickstarter.com:8443#优选-1
-garajcloud.com:8443#优选-2
-cdn.weglot.com:2053#优选-3
-www.vehicleservicepros.com:2083#优选-4
-static.visitnorway.com:2096#优选-5
-instant.page:2053#优选-6
-js.partnerstack.com:2083#优选-7
-www.gartner.com:2087#优选-8
+instant.page:2083#优选-1
+ravimehta.substack.com:2096#优选-2
+www.ispring.com:2083#优选-3
+cdn.discordapp.com:8443#优选-4
+discord.com:2096#优选-5
+www.dinova.one:2096#优选-6
+www.fortra.com:2083#优选-7
+docutils.sourceforge.net:2087#优选-8
