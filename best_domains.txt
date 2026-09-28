@@ -1,8 +1,8 @@
-io.narrative.io:2083#优选-1
-www.reaxys.com:2096#优选-2
-www.ispring.com:2083#优选-3
-customer-4kk46owsqfvwvgpb.cloudflarestream.com:2083#优选-4
-medium.com:2053#优选-5
-cdn.pixabay.com:2096#优选-6
-cdn2.hubspot.net:2087#优选-7
-global.featurebase-attachments.com:2096#优选-8
+cdn.discordapp.com:2096#优选-1
+client-metrics.discordapp.net:2096#优选-2
+cdn2.hubspot.net:2053#优选-3
+discord.com:2053#优选-4
+cdnjs.com:8443#优选-5
+flagpedia.net:2053#优选-6
+global.featurebase-attachments.com:8443#优选-7
+esm.sh:2083#优选-8
