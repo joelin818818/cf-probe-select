@@ -1,6 +1,8 @@
 name = "cf-probe-select"
 main = "worker/worker.js"
 compatibility_date = "2024-09-23"
+# 保留控制台手动加、但未在本 toml 声明的变量（默认 keep_vars=false 会在部署时清掉）
+keep_vars = true
 
 # 如需绑定自定义域名，取消下行注释并在 Cloudflare 面板添加
 # routes = [
