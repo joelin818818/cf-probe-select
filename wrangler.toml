@@ -16,4 +16,4 @@ keep_vars = true
 # WORKER_VERSION 由 Actions 自动写入，为 worker/ 目录最新提交时间（北京时间 YYMMDDHHmm）。
 [vars]
 RAW_DOMAINS_URL = "https://raw.githubusercontent.com/joelin818818/cf-probe-select/main/cf_domains.txt"
-WORKER_VERSION = "2609200925"
+WORKER_VERSION = "2609291458"
