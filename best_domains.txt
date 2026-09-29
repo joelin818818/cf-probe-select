@@ -1,8 +1,8 @@
-cdn.discordapp.com:2096#优选-1
-client-metrics.discordapp.net:2096#优选-2
-cdn2.hubspot.net:2053#优选-3
-discord.com:2053#优选-4
-cdnjs.com:8443#优选-5
-flagpedia.net:2053#优选-6
-global.featurebase-attachments.com:8443#优选-7
-esm.sh:2083#优选-8
+www.europeana.eu:2053#优选-1
+cdn.pixabay.com:8443#优选-2
+lovable.dev:2053#优选-3
+www.okta.com:2087#优选-4
+upwork.com:8443#优选-5
+www.elsevierhealth.com.au:2096#优选-6
+core.dimatter.ai:2087#优选-7
+www.york.ac.uk:2083#优选-8
