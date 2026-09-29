@@ -533,7 +533,7 @@ async function buildExportUrl() {
   } catch (e) {
     sig = "";
   }
-  return location.origin + "/s/" + items.join("/") + (sig ? "/" + sig : "") + ".txt";
+  return location.origin + "/s/" + items.join("/") + ".txt" + (sig ? "?sig=" + sig : "");
 }
 
 function ipHtml(domain) {

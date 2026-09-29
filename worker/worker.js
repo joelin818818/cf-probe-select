@@ -389,13 +389,13 @@ export default {
       return new Response(name + " 拉取失败: " + errors.join(" | "), { status: 502 });
     }
 
-    // 导出快照：/s/d1/d2/d3/<签名>.txt，列表写在路径里，内容随链接永久冻结
+    // 导出快照：/s/d1/d2/d3.txt?sig=签名，列表写在路径里，内容随链接永久冻结
     if (path.startsWith("/s/")) {
       const payload = path.slice(3);
       if (!payload.endsWith(".txt")) return new Response("bad snapshot url", { status: 400 });
       const parts = payload.slice(0, -4).split("/").map((s) => s.trim()).filter(Boolean);
-      // 配了 SIGN_SECRET 时最后一段是签名；未配置则全部按条目处理（旧链接仍可用）
-      const sig = env && env.SIGN_SECRET ? (parts.pop() || "") : "";
+      // 签名在 query（?sig=），不占路径段，避免被订阅客户端当成条目
+      const sig = env && env.SIGN_SECRET ? (url.searchParams.get("sig") || "") : "";
       const items = parts;
       if (!items.length || items.length > 30) return new Response("bad snapshot items", { status: 400 });
       // 只放行域名/IP 字符集，避免链接被当作任意文本外发
