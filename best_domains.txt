@@ -1,8 +1,8 @@
-js.hs-banner.com:2083#优选-1
-customer-wdqko9h3ubekuskt.videodelivery.net:2083#优选-2
-cdn.discordapp.com:2053#优选-3
-garajcloud.com:2083#优选-4
-discord.com:2096#优选-5
-www.lego.com:2087#优选-6
-client-metrics.discordapp.net:2096#优选-7
-www.pharmapendium.com:2083#优选-8
+www.mendeley.com:8443#优选-1
+birdsandbeans.substack.com:2087#优选-2
+static.addtoany.com:2053#优选-3
+techdestination.com:8443#优选-4
+client-metrics.discordapp.net:2087#优选-5
+apply.workable.com:2096#优选-6
+www.teamviewer.com:2096#优选-7
+www.retailmenot.com:2053#优选-8
