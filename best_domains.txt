@@ -1,8 +1,8 @@
-journals.sagepub.com:2083#优选-1
-cdn.weglot.com:2053#优选-2
-www.elsevierhealth.com.au:8443#优选-3
-medium.com:8443#优选-4
-www.kickstarter.com:2087#优选-5
-www.iaemconference.org:2087#优选-6
-www.mendeley.com:8443#优选-7
-lovable.dev:2087#优选-8
+cdn.discordapp.com:2087#优选-1
+wpmudev.com:2087#优选-2
+www.nomios.fr:2083#优选-3
+medium.com:2083#优选-4
+customer-4kk46owsqfvwvgpb.cloudflarestream.com:8443#优选-5
+customer-wdqko9h3ubekuskt.videodelivery.net:8443#优选-6
+truckingdive.tradepub.com:2083#优选-7
+static.visitnorway.com:2087#优选-8
