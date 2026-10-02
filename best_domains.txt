@@ -1,8 +1,8 @@
-static.ietf.org:2053#优选-1
-journals.sagepub.com:2053#优选-2
-www.starrydns.com:2096#优选-3
-wpenginestatus.com:2087#优选-4
-www.nomios.be:2083#优选-5
-www.kickstarter.com:8443#优选-6
-example.com:2096#优选-7
-www.teamviewer.com:2087#优选-8
+www.iana.org:8443#优选-1
+io.narrative.io:2087#优选-2
+customer-wdqko9h3ubekuskt.videodelivery.net:2053#优选-3
+murrinmedia.com.au:2083#优选-4
+www.jsdelivr.com:2096#优选-5
+www.nomios.fr:2096#优选-6
+www.agirlcreative.com:2096#优选-7
+fortelabs.com:8443#优选-8
