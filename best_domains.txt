@@ -1,8 +1,8 @@
-hello.myfonts.net:2087#优选-1
-www2.mmu.ac.uk:2096#优选-2
-midjourney.com:8443#优选-3
-www.forhers.com:2053#优选-4
-clutch.co:8443#优选-5
-www.newfold.com:2087#优选-6
-le.fbi.gov:2083#优选-7
-misja.com:2053#优选-8
+cdn.weglot.com:2087#优选-1
+www.glassdoor.com:2053#优选-2
+html-load.com:2083#优选-3
+customer-wdqko9h3ubekuskt.videodelivery.net:8443#优选-4
+cdn2.hubspot.net:2087#优选-5
+www.europeana.eu:2087#优选-6
+geoip-js.com:2087#优选-7
+website.grader.com:2053#优选-8
