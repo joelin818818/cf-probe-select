@@ -1,8 +1,8 @@
-www.iana.org:8443#优选-1
-io.narrative.io:2087#优选-2
-customer-wdqko9h3ubekuskt.videodelivery.net:2053#优选-3
-murrinmedia.com.au:2083#优选-4
-www.jsdelivr.com:2096#优选-5
-www.nomios.fr:2096#优选-6
-www.agirlcreative.com:2096#优选-7
-fortelabs.com:8443#优选-8
+hello.myfonts.net:2087#优选-1
+www2.mmu.ac.uk:2096#优选-2
+midjourney.com:8443#优选-3
+www.forhers.com:2053#优选-4
+clutch.co:8443#优选-5
+www.newfold.com:2087#优选-6
+le.fbi.gov:2083#优选-7
+misja.com:2053#优选-8
