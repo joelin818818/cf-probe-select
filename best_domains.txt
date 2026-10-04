@@ -1,8 +1,8 @@
-cdn.weglot.com:2087#优选-1
-www.glassdoor.com:2053#优选-2
-html-load.com:2083#优选-3
-customer-wdqko9h3ubekuskt.videodelivery.net:8443#优选-4
-cdn2.hubspot.net:2087#优选-5
-www.europeana.eu:2087#优选-6
-geoip-js.com:2087#优选-7
-website.grader.com:2053#优选-8
+static.addtoany.com:2096#优选-1
+cdn.mouseflow.com:2083#优选-2
+wpmudev.com:2053#优选-3
+www.raspberrypi.com:2083#优选-4
+clutch.co:2087#优选-5
+www.nomios.lu:2083#优选-6
+www.courthousenews.com:2096#优选-7
+www.adaca.com:2083#优选-8
