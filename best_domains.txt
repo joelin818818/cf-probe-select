@@ -1,8 +1,8 @@
-static.addtoany.com:2096#优选-1
-cdn.mouseflow.com:2083#优选-2
-wpmudev.com:2053#优选-3
-www.raspberrypi.com:2083#优选-4
-clutch.co:2087#优选-5
-www.nomios.lu:2083#优选-6
-www.courthousenews.com:2096#优选-7
-www.adaca.com:2083#优选-8
+www.bootstrapcdn.com:2087#优选-1
+www.perplexity.ai:8443#优选-2
+example.org:2083#优选-3
+www.glassdoor.com:2087#优选-4
+image.jimcdn.com:2053#优选-5
+clutch.co:2096#优选-6
+cookieandkate.com:2083#优选-7
+journals.sagepub.com:2083#优选-8
