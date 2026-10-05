@@ -1,8 +1,8 @@
-www.bootstrapcdn.com:2087#优选-1
-www.perplexity.ai:8443#优选-2
-example.org:2083#优选-3
-www.glassdoor.com:2087#优选-4
-image.jimcdn.com:2053#优选-5
-clutch.co:2096#优选-6
-cookieandkate.com:2083#优选-7
-journals.sagepub.com:2083#优选-8
+www.kickstarter.com:2053#优选-1
+www.iana.org:2087#优选-2
+www.nomios.com:2096#优选-3
+well-ladybird-9.clerk.accounts.dev:2083#优选-4
+cdn-cookieyes.com:2096#优选-5
+docutils.sourceforge.net:2083#优选-6
+www.starrydns.com:2096#优选-7
+palmiq.com:8443#优选-8
