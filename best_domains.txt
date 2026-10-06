@@ -1,8 +1,8 @@
-jsfiddle.net:8443#优选-1
-cdn.optimizely.com:8443#优选-2
-cdn2.hubspot.net:2083#优选-3
-lovable.dev:2083#优选-4
-www.cnnindonesia.com:2096#优选-5
-static.visitnorway.com:2087#优选-6
-www.nomios.pl:2083#优选-7
-basescan.org:2096#优选-8
+cdn.discordapp.com:2053#优选-1
+www.elsevierhealth.com.au:2053#优选-2
+www.okta.com:2096#优选-3
+geoip-js.com:8443#优选-4
+customer-4kk46owsqfvwvgpb.cloudflarestream.com:2096#优选-5
+well-ladybird-9.clerk.accounts.dev:2087#优选-6
+image.jimcdn.com:2087#优选-7
+mistral.ai:2083#优选-8
