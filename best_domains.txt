@@ -1,8 +1,8 @@
-geoip-js.com:2053#优选-1
-example.com:2083#优选-2
-lovable.dev:2053#优选-3
-www.glassdoor.co.in:2053#优选-4
-www.mendeley.com:2083#优选-5
-www.g2.com:8443#优选-6
-cdn.weglot.com:2087#优选-7
-forms.hscollectedforms.net:8443#优选-8
+example.com:2083#优选-1
+cdn.weglot.com:2087#优选-2
+www.fortra.com:2083#优选-3
+www.starrydns.com:2096#优选-4
+wpmudev.com:2087#优选-5
+yaycommerce.com:2053#优选-6
+embed.tawk.to:2083#优选-7
+www.nomios.nl:2083#优选-8
