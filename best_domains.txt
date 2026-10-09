@@ -1,8 +1,8 @@
-cdn.discordapp.com:2053#优选-1
-www.courthousenews.com:2096#优选-2
-cdn.tailwindcss.com:2083#优选-3
-www.thefragranceshop.co.uk:8443#优选-4
-oss.maxcdn.com:2053#优选-5
-serpapi.com:2053#优选-6
-newsroom.br.paypal-corp.com:8443#优选-7
-html-load.com:2087#优选-8
+hello.myfonts.net:8443#优选-1
+clutch.co:2087#优选-2
+cdn.pixabay.com:8443#优选-3
+www.cnnindonesia.com:2096#优选-4
+www.auth0.com:2053#优选-5
+www.nomios.fr:2053#优选-6
+www.courthousenews.com:2083#优选-7
+cybersheath.com:2096#优选-8
