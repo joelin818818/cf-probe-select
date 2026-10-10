@@ -1,8 +1,8 @@
-agitated-raman-8p00pa70vw.projects.oryapis.com:2053#优选-1
-www.pharmapendium.com:8443#优选-2
-vonaghgwlbgfsbiwtsnm.supabase.co:2096#优选-3
-dustin.nl:2083#优选-4
-example.com:2053#优选-5
-www.name.com:2087#优选-6
-www.nomios.co.uk:2083#优选-7
-btloader.com:2053#优选-8
+vonaghgwlbgfsbiwtsnm.supabase.co:2083#优选-1
+midjourney.com:2096#优选-2
+hello.myfonts.net:2083#优选-3
+yep.com:2096#优选-4
+www.mendeley.com:2096#优选-5
+image.jimcdn.com:2083#优选-6
+yoast.com:2096#优选-7
+www.reaxys.com:8443#优选-8
