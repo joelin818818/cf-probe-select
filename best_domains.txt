@@ -1,8 +1,8 @@
-edge.atmtd.com:2053#优选-1
-api.producthunt.com:2083#优选-2
-www.lego.com:2087#优选-3
-www.forhers.com:2096#优选-4
-mintcdn.com:2087#优选-5
-www.okta.com:8443#优选-6
-www.nomios.co.uk:2053#优选-7
-vonaghgwlbgfsbiwtsnm.supabase.co:8443#优选-8
+cdn.tailwindcss.com:2087#优选-1
+www.fortra.com:2087#优选-2
+assets.calendly.com:8443#优选-3
+www.nomios.com:2083#优选-4
+fitfoodiefinds.com:2083#优选-5
+mcp.wpvibe.ai:2096#优选-6
+www.kickstarter.com:2087#优选-7
+bitform.quora.com:2087#优选-8
