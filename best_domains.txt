@@ -1,8 +1,8 @@
-getbootstrap.com:2096#优选-1
-analytics.ahrefs.com:2053#优选-2
-askalltech.com:2083#优选-3
-blackfriday.com:8443#优选-4
-www.icann.org:2083#优选-5
-www.reaxys.com:2087#优选-6
-www.courthousenews.com:2083#优选-7
-www.seedprod.com:2053#优选-8
+www.kickstarter.com:8443#优选-1
+static.expo.dev:2087#优选-2
+cdn.pixabay.com:8443#优选-3
+cdn.mouseflow.com:2053#优选-4
+www.fortra.com:2083#优选-5
+www.onetrust.com:2083#优选-6
+www.lufthansa.com:2083#优选-7
+www.mendeley.com:2053#优选-8
