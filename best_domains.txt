@@ -1,8 +1,8 @@
-hello.myfonts.net:2083#优选-1
-analytics.ahrefs.com:2087#优选-2
-www.kickstarter.com:2083#优选-3
-oss.maxcdn.com:2096#优选-4
-www.newfold.com:2087#优选-5
-forms.hscollectedforms.net:2096#优选-6
-io.narrative.io:2083#优选-7
-www.icann.org:8443#优选-8
+n8n.io:2053#优选-1
+cdn.pixabay.com:2053#优选-2
+www.nomios.com:2096#优选-3
+www.retailmenot.com:2087#优选-4
+sierra.chat:8443#优选-5
+serpapi.com:2096#优选-6
+www.ziprecruiter.co.uk:2083#优选-7
+cdnjs.com:2096#优选-8
