@@ -1,8 +1,8 @@
-www.onetrust.com:2083#优选-1
-static.ietf.org:2083#优选-2
-www.inbound.com:2083#优选-3
-techcrunch.com:2083#优选-4
-cdn.whatfix.com:2087#优选-5
-www.newfold.com:2096#优选-6
-media.licdn.com:2083#优选-7
-cdn.quilljs.com:8443#优选-8
+sallysbakingaddiction.com:2083#优选-1
+blackfriday.com:2096#优选-2
+www.mendeley.com:2087#优选-3
+www.npmjs.com:2087#优选-4
+esm.sh:2087#优选-5
+cdn.tailwindcss.com:8443#优选-6
+www.jsdelivr.com:2083#优选-7
+jsfiddle.net:2087#优选-8
