@@ -1,8 +1,8 @@
-well-ladybird-9.clerk.accounts.dev:2083#优选-1
-www.kickstarter.com:2053#优选-2
-codecanyon.net:2096#优选-3
-serpapi.com:2087#优选-4
-datacom.com:2087#优选-5
-static.olark.com:2083#优选-6
-www.trustradius.com:2096#优选-7
-awpcp.com:2053#优选-8
+www.forhers.com:2087#优选-1
+www.kickstarter.com:2083#优选-2
+cdn.weglot.com:2096#优选-3
+cloudinary.com:2096#优选-4
+www.onetrust.com:2053#优选-5
+www.glassdoor.co.in:2083#优选-6
+www.pangram.com:2053#优选-7
+serpapi.com:8443#优选-8
