@@ -1,8 +1,8 @@
-www.forhers.com:2087#优选-1
-www.kickstarter.com:2083#优选-2
-cdn.weglot.com:2096#优选-3
-cloudinary.com:2096#优选-4
-www.onetrust.com:2053#优选-5
-www.glassdoor.co.in:2083#优选-6
-www.pangram.com:2053#优选-7
-serpapi.com:8443#优选-8
+saasmaster.net:2083#优选-1
+cdn.tailwindcss.com:2096#优选-2
+static.getclicky.com:2096#优选-3
+mintcdn.com:2083#优选-4
+money.com:8443#优选-5
+sallysbakingaddiction.com:2096#优选-6
+www.crunchbase.com:2096#优选-7
+www.name.com:2083#优选-8
