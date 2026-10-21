@@ -1,8 +1,8 @@
-flagcdn.com:2096#优选-1
-sallysbakingaddiction.com:2087#优选-2
-cdn.datatables.net:2087#优选-3
-html-load.com:8443#优选-4
-cdn.tailwindcss.com:2053#优选-5
-cdn.localizeapi.com:2083#优选-6
-www.g2.com:2053#优选-7
-well-ladybird-9.clerk.accounts.dev:2087#优选-8
+cdn.tailwindcss.com:2087#优选-1
+cdn.weglot.com:2087#优选-2
+www.retailmenot.com:2083#优选-3
+rankmath.com:2053#优选-4
+discord.com:2083#优选-5
+www.bootstrapcdn.com:2087#优选-6
+api.producthunt.com:2053#优选-7
+www.seedprod.com:8443#优选-8
