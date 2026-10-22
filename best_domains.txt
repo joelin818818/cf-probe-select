@@ -1,8 +1,8 @@
-cloudinary.com:2087#优选-1
-discord.com:8443#优选-2
-www.name.com:2096#优选-3
-html-load.com:2053#优选-4
-oss.maxcdn.com:2096#优选-5
-www.vonage.sg:8443#优选-6
-www.hcisingapore.gov.in:2096#优选-7
-www.nomios.co.uk:8443#优选-8
+discord.com:2083#优选-1
+www.retailmenot.com:2053#优选-2
+cdn.weglot.com:8443#优选-3
+www.newfold.com:2087#优选-4
+geoip-js.com:8443#优选-5
+www.forhers.com:2083#优选-6
+well-ladybird-9.clerk.accounts.dev:2096#优选-7
+cdn.pixabay.com:2096#优选-8
