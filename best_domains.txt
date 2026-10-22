@@ -1,8 +1,8 @@
-cdn.tailwindcss.com:2087#优选-1
-cdn.weglot.com:2087#优选-2
-www.retailmenot.com:2083#优选-3
-rankmath.com:2053#优选-4
-discord.com:2083#优选-5
-www.bootstrapcdn.com:2087#优选-6
-api.producthunt.com:2053#优选-7
-www.seedprod.com:8443#优选-8
+cloudinary.com:2087#优选-1
+discord.com:8443#优选-2
+www.name.com:2096#优选-3
+html-load.com:2053#优选-4
+oss.maxcdn.com:2096#优选-5
+www.vonage.sg:8443#优选-6
+www.hcisingapore.gov.in:2096#优选-7
+www.nomios.co.uk:8443#优选-8
