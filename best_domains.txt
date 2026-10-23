@@ -1,8 +1,8 @@
-discord.com:2083#优选-1
-www.retailmenot.com:2053#优选-2
-cdn.weglot.com:8443#优选-3
-www.newfold.com:2087#优选-4
-geoip-js.com:8443#优选-5
-www.forhers.com:2083#优选-6
-well-ladybird-9.clerk.accounts.dev:2096#优选-7
-cdn.pixabay.com:2096#优选-8
+www.mendeley.com:2053#优选-1
+cdn.tailwindcss.com:2087#优选-2
+clutch.co:2083#优选-3
+m.slashdot.org:8443#优选-4
+www.iana.org:2096#优选-5
+www.onetrust.com:8443#优选-6
+www.ziprecruiter.co.uk:8443#优选-7
+ghbtns.com:2053#优选-8
