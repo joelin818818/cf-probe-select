@@ -1,8 +1,8 @@
-esm.sh:8443#优选-1
-readwrite.com:2087#优选-2
-www.perplexity.ai:2087#优选-3
-www.retailmenot.com:2087#优选-4
-www.hcisingapore.gov.in:2083#优选-5
-sallysbakingaddiction.com:2096#优选-6
-techcrunch.com:2087#优选-7
-www.glassdoor.co.in:8443#优选-8
+cdn.discordapp.com:2053#优选-1
+flagcdn.com:2083#优选-2
+conf.config-security.com:2096#优选-3
+journals.aps.org:2087#优选-4
+www.fortra.com:2087#优选-5
+portal.altaro.com:8443#优选-6
+www.newfold.com:2096#优选-7
+www.indeed.com:2053#优选-8
