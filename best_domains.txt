@@ -1,8 +1,8 @@
-cdn.discordapp.com:8443#优选-1
-yep.com:2087#优选-2
-cdn.whatfix.com:8443#优选-3
-www.gotruckers.com:2053#优选-4
+cdn.discordapp.com:2096#优选-1
+cdn.tailwindcss.com:2053#优选-2
+static.addtoany.com:2087#优选-3
+www.glassdoor.co.in:2096#优选-4
 www.ziprecruiter.co.uk:2096#优选-5
-southside.edu:2083#优选-6
-js.hcaptcha.com:2096#优选-7
-www.reaxys.com:8443#优选-8
+flagcdn.com:2096#优选-6
+cdn.localizeapi.com:2096#优选-7
+bit-integrations.com:2053#优选-8
