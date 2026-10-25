@@ -1,8 +1,8 @@
-cdn.discordapp.com:2053#优选-1
-flagcdn.com:2083#优选-2
-conf.config-security.com:2096#优选-3
-journals.aps.org:2087#优选-4
-www.fortra.com:2087#优选-5
-portal.altaro.com:8443#优选-6
-www.newfold.com:2096#优选-7
-www.indeed.com:2053#优选-8
+cdn.discordapp.com:8443#优选-1
+yep.com:2087#优选-2
+cdn.whatfix.com:8443#优选-3
+www.gotruckers.com:2053#优选-4
+www.ziprecruiter.co.uk:2096#优选-5
+southside.edu:2083#优选-6
+js.hcaptcha.com:2096#优选-7
+www.reaxys.com:8443#优选-8
