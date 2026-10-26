@@ -18,6 +18,8 @@ jobs:
   speed-test:
     runs-on: [self-hosted, linux, x64, cf-probe]
     timeout-minutes: 20
+    env:
+      PATH: "$HOME/.local/bin:$PATH"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,9 +29,9 @@ jobs:
         run: |
           set -e
           # 查询出口 IP 归属国，判断国内/海外；查不到按海外处理（直连优先）
+          # 用 grep+sed 解析，不依赖 python3（此时 python 尚未就绪）
           CC=$(curl -sS --connect-timeout 5 --max-time 10 https://ipinfo.io/json 2>/dev/null \
-               | python3 -c 'import sys,json;print(json.load(sys.stdin).get("country",""))' 2>/dev/null || echo "")
-          CC=$(echo "$CC" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z')
+               | grep -o '"country":[[:space:]]*"[A-Z]*"' | head -1 | sed 's/.*"\([A-Z]*\)"/\1/')
           if [ "$CC" = "CN" ]; then
             echo "[*] 出口 IP 归属: 中国大陆 ($CC) → 镜像优先"
             echo "CC=CN" >> "$GITHUB_OUTPUT"
@@ -42,17 +44,20 @@ jobs:
             echo "PYPI_FALLBACK=https://registry.npmmirror.com/pypi/simple/" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up Python 3.11 (auto region-aware)
+      - name: Set up Python 3.11 (auto region-aware, no sudo)
         env:
           REGION_CC: ${{ steps.region.outputs.CC }}
         run: |
           set -e
+          export PATH="$HOME/.local/bin:$PATH"
+
           # 1) 优先用系统已装的 python3，版本 >= 3.11 即直接采用，跳过下载
           if command -v python3 >/dev/null 2>&1; then
             SYS_VER=$(python3 -c 'import sys;print("%d.%d"%(sys.version_info[0],sys.version_info[1]))' 2>/dev/null || echo 0.0)
             if [ "$SYS_VER" = "3.11" ] || [ "$SYS_VER" \> "3.11" ] 2>/dev/null; then
-              sudo ln -sf "$(command -v python3)" /usr/local/bin/python
-              sudo ln -sf "$(command -v python3)" /usr/local/bin/python3
+              mkdir -p "$HOME/.local/bin"
+              ln -sf "$(command -v python3)" "$HOME/.local/bin/python"
+              ln -sf "$(command -v python3)" "$HOME/.local/bin/python3"
               echo "[ok] 使用系统 Python $SYS_VER"
               python --version
               exit 0
@@ -91,12 +96,15 @@ jobs:
             exit 1
           fi
 
-          sudo mkdir -p /opt/python311
-          sudo tar -xzf /tmp/py.tar.gz -C /opt/python311 --strip-components=1
-          sudo ln -sf /opt/python311/bin/python3.11 /usr/local/bin/python
-          sudo ln -sf /opt/python311/bin/python3.11 /usr/local/bin/python3
-          sudo ln -sf /opt/python311/bin/pip3.11 /usr/local/bin/pip
-          /usr/local/bin/python --version
+          # 装到用户目录，无需 sudo
+          PYHOME="$HOME/.local/python311"
+          mkdir -p "$PYHOME"
+          tar -xzf /tmp/py.tar.gz -C "$PYHOME" --strip-components=1
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$PYHOME/bin/python3.11" "$HOME/.local/bin/python"
+          ln -sf "$PYHOME/bin/python3.11" "$HOME/.local/bin/python3"
+          ln -sf "$PYHOME/bin/pip3.11" "$HOME/.local/bin/pip"
+          python --version
 
       - name: Install dependencies (region-aware PyPI fallback)
         env:
