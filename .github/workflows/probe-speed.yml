@@ -22,7 +22,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11 (direct → mirrors fallback)
+      - name: Detect region (CN → mirrors first, overseas → direct first)
+        id: region
+        run: |
+          set -e
+          # 查询出口 IP 归属国，判断国内/海外；查不到按海外处理（直连优先）
+          CC=$(curl -sS --connect-timeout 5 --max-time 10 https://ipinfo.io/json 2>/dev/null \
+               | python3 -c 'import sys,json;print(json.load(sys.stdin).get("country",""))' 2>/dev/null || echo "")
+          CC=$(echo "$CC" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z')
+          if [ "$CC" = "CN" ]; then
+            echo "[*] 出口 IP 归属: 中国大陆 ($CC) → 镜像优先"
+            echo "CC=CN" >> "$GITHUB_OUTPUT"
+            echo "PYPI_PRIMARY=https://registry.npmmirror.com/pypi/simple/" >> "$GITHUB_OUTPUT"
+            echo "PYPI_FALLBACK=https://pypi.org/simple/" >> "$GITHUB_OUTPUT"
+          else
+            echo "[*] 出口 IP 归属: 海外 ($CC) → 直连优先"
+            echo "CC=$CC" >> "$GITHUB_OUTPUT"
+            echo "PYPI_PRIMARY=https://pypi.org/simple/" >> "$GITHUB_OUTPUT"
+            echo "PYPI_FALLBACK=https://registry.npmmirror.com/pypi/simple/" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python 3.11 (auto region-aware)
+        env:
+          REGION_CC: ${{ steps.region.outputs.CC }}
         run: |
           set -e
           # 1) 优先用系统已装的 python3，版本 >= 3.11 即直接采用，跳过下载
@@ -37,17 +59,23 @@ jobs:
             fi
           fi
 
-          # 2) 系统不满足则下载官方预编译包；依次尝试直连与多镜像回退
+          # 2) 系统不满足则下载官方预编译包
+          #    国内：镜像优先 → 直连兜底；海外：直连优先 → 镜像兜底
           PY="python-3.11.17-linux-22.04-x64.tar.gz"
           DIRECT="https://github.com/actions/python-versions/releases/download/3.11.17-36876195594/$PY"
-          MIRRORS=(
-            "$DIRECT"
-            "https://ghfile.geekertao.top/$DIRECT"
-            "https://cdn.gh-proxy.com/$DIRECT"
-          )
+          M1="https://ghfile.geekertao.top/$DIRECT"
+          M2="https://cdn.gh-proxy.com/$DIRECT"
+
+          if [ "$REGION_CC" = "CN" ]; then
+            URLS=("$M1" "$M2" "$DIRECT")
+            echo "[*] 国内策略: 镜像优先"
+          else
+            URLS=("$DIRECT" "$M1" "$M2")
+            echo "[*] 海外策略: 直连优先"
+          fi
 
           DOWNLOADED=0
-          for URL in "${MIRRORS[@]}"; do
+          for URL in "${URLS[@]}"; do
             echo "[*] 尝试下载: $URL"
             if curl -fL --connect-timeout 10 --max-time 120 -o /tmp/py.tar.gz "$URL" 2>/dev/null; then
               echo "[ok] 下载成功: $URL"
@@ -70,13 +98,16 @@ jobs:
           sudo ln -sf /opt/python311/bin/pip3.11 /usr/local/bin/pip
           /usr/local/bin/python --version
 
-      - name: Install dependencies (PyPI → npmmirror fallback)
+      - name: Install dependencies (region-aware PyPI fallback)
+        env:
+          PYPI_PRIMARY: ${{ steps.region.outputs.PYPI_PRIMARY }}
+          PYPI_FALLBACK: ${{ steps.region.outputs.PYPI_FALLBACK }}
         run: |
           set -e
-          python -m pip install --upgrade pip -i https://pypi.org/simple/ || \
-            python -m pip install --upgrade pip -i https://registry.npmmirror.com/pypi/simple/
-          pip install -r requirements.txt -i https://pypi.org/simple/ || \
-            pip install -r requirements.txt -i https://registry.npmmirror.com/pypi/simple/
+          python -m pip install --upgrade pip -i "$PYPI_PRIMARY" || \
+            python -m pip install --upgrade pip -i "$PYPI_FALLBACK"
+          pip install -r requirements.txt -i "$PYPI_PRIMARY" || \
+            pip install -r requirements.txt -i "$PYPI_FALLBACK"
 
       - name: Run speed test
         run: python probe_speed.py
