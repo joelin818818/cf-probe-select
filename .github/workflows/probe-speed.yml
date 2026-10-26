@@ -19,7 +19,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, cf-probe]
     timeout-minutes: 20
     env:
-      PATH: "$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+      PATH: "/home/github-runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,8 +56,13 @@ jobs:
             SYS_VER=$(python3 -c 'import sys;print("%d.%d"%(sys.version_info[0],sys.version_info[1]))' 2>/dev/null || echo 0.0)
             if [ "$SYS_VER" = "3.11" ] || [ "$SYS_VER" \> "3.11" ] 2>/dev/null; then
               mkdir -p "$HOME/.local/bin"
-              # readlink -f 解析真实路径，避免 command -v 返回软链自身导致循环软链（python3 -> 自己）
-              PYBIN=$(readlink -f "$(command -v python3)")
+              # 优先用真实二进制 python3.11（/usr/bin 下，非软链），杜绝软链指回自身导致循环
+              PYBIN=""
+              if command -v python3.11 >/dev/null 2>&1; then
+                PYBIN=$(command -v python3.11)
+              else
+                PYBIN=$(readlink -f "$(command -v python3)")
+              fi
               ln -sf "$PYBIN" "$HOME/.local/bin/python"
               ln -sf "$PYBIN" "$HOME/.local/bin/python3"
               echo "[ok] 使用系统 Python $SYS_VER"
