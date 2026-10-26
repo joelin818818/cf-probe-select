@@ -1076,6 +1076,7 @@ export function html(version) {
       <span>IP 结果 <a href="/ips.txt" target="_blank">/ips.txt</a></span>
       <button id="copyIps" class="ghost">复制链接</button>
     </div>
+    <div class="note">以上两项支持 ?s=N 控制显示条数：默认 50 条、s=0 为空、最多 50 条（例：/best_domains.txt?s=5）。</div>
     <div class="row" style="justify-content:flex-end"><button id="expClose" class="ghost">关闭</button></div>
   </div>
 </div>
