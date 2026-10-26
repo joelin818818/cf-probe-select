@@ -127,8 +127,8 @@ python probe_speed.py       # 只测速，更新 ips.txt / best_domains.txt
 | `DNS_TIMEOUT_DOH` | `5` | DoH 解析超时（秒） |
 | `CF_RANGES_TIMEOUT` | `10` | 拉取 Cloudflare 官方 IP 段的超时（秒） |
 | `IP_CONNECT_TIMEOUT` | `2` | 优选 IP 单轮建连/握手超时（秒） |
-| `TOP_IP_COUNT` | `8` | 写入 ips.txt 的优选 IP 数量 |
-| `IP_PRESELECT` | `30` | 粗筛阶段保留的候选 IP 数 |
+| `TOP_IP_COUNT` | `50` | 写入 ips.txt 的优选 IP 数量 |
+| `IP_PRESELECT` | `80` | 粗筛阶段保留的候选 IP 数 |
 | `IP_ROUNDS` | `3` | 精测阶段每个 IP 的测速轮数 |
 | `IP_WEIGHTS` | `tcp 0.3 / tls 0.4 / ttfb 0.3` | 精测三项指标的评分权重 |
 | `IP_PORTS` | `[2053, 2083, 2087, 2096, 8443]` | 输出端口池，每个 IP 随机取一个 |
@@ -150,22 +150,22 @@ python probe_speed.py       # 只测速，更新 ips.txt / best_domains.txt
 `ips.txt`：
 
 ```
-104.16.132.229:2053#优选-1
-172.64.144.162:8443#优选-2
+104.16.132.229:2053#IP优选-1
+172.64.144.162:8443#IP优选-2
 ```
 
 `best_domains.txt`：
 
 ```
-example.com:8443#优选-1
-example.org:2053#优选-2
+example.com:8443#域名优选-1
+example.org:2053#域名优选-2
 ```
 
 ### 测速方式
 
-1. **粗筛**：全部候选 IP 各做 1 次 TCP 建连，按 RTT 升序保留最快 30 个；
-2. **精测**：对这 30 个各测 3 轮，单轮在同一条连接上依次测 TCP 建连、TLS 握手、HTTP 首字节（TLS 用该 IP 对应的域名做 SNI 并校验证书）；
-3. **评分**：三项各自除以全场最优值归一化后加权求和（TCP 0.3 / TLS 0.4 / 首字节 0.3），成功率优先、评分升序，取前 8。
+1. **粗筛**：全部候选 IP 各做 1 次 TCP 建连，按 RTT 升序保留最快 80 个；
+2. **精测**：对这 80 个各测 3 轮，单轮在同一条连接上依次测 TCP 建连、TLS 握手、HTTP 首字节（TLS 用该 IP 对应的域名做 SNI 并校验证书）；
+3. **评分**：三项各自除以全场最优值归一化后加权求和（TCP 0.3 / TLS 0.4 / 首字节 0.3），成功率优先、评分升序，取前 50。
 
 ### 订阅地址
 

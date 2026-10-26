@@ -671,7 +671,7 @@ def select_best_ips(saved: set):
     try:
         with open(IPS_OUTPUT_FILE, "w", encoding="utf-8") as f:
             for i, r in enumerate(top, 1):
-                f.write(f"{r['ip']}:{random.choice(IP_PORTS)}#优选-{i}\n")
+                f.write(f"{r['ip']}:{random.choice(IP_PORTS)}#IP优选-{i}\n")
         h = top[0]
         print(f"[*] 已写入 {len(top)} 个优选 IP -> {IPS_OUTPUT_FILE}（第 1 名 {h['ip']}"
               f" 均 TCP {h['avg']['tcp'] * 1000:.0f}ms / TLS {h['avg']['tls'] * 1000:.0f}ms"
@@ -689,7 +689,7 @@ def select_best_ips(saved: set):
     try:
         with open(BEST_DOMAINS_OUTPUT_FILE, "w", encoding="utf-8") as f:
             for i, h in enumerate(hosts, 1):
-                f.write(f"{h}:{random.choice(IP_PORTS)}#优选-{i}\n")
+                f.write(f"{h}:{random.choice(IP_PORTS)}#域名优选-{i}\n")
         print(f"[*] 已写入 {len(hosts)} 个优选域名 -> {BEST_DOMAINS_OUTPUT_FILE}")
     except Exception as e:
         print(f"[!] {BEST_DOMAINS_OUTPUT_FILE} 写回失败: {e}")
