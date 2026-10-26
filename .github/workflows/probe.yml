@@ -128,8 +128,8 @@ jobs:
           set -e
           python -m pip install --upgrade pip -i "$PYPI_PRIMARY" || \
             python -m pip install --upgrade pip -i "$PYPI_FALLBACK"
-          pip install -r requirements.txt -i "$PYPI_PRIMARY" || \
-            pip install -r requirements.txt -i "$PYPI_FALLBACK"
+          python -m pip install -r requirements.txt -i "$PYPI_PRIMARY" || \
+            python -m pip install -r requirements.txt -i "$PYPI_FALLBACK"
 
       - name: Debug existing cf_domains.txt
         run: |
