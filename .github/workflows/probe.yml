@@ -7,7 +7,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   # 同一工作流同时只能跑一个实例，避免并行探测互相覆盖 cf_domains.txt
@@ -16,8 +16,10 @@ concurrency:
 
 jobs:
   discover-cf-domains:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, cf-probe]
     timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
