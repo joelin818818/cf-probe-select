@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11 (direct → ghproxy mirror fallback)
+      - name: Set up Python 3.11 (direct → mirrors fallback)
         run: |
           set -e
           # 1) 优先用系统已装的 python3，版本 >= 3.11 即直接采用，跳过下载
@@ -37,18 +37,30 @@ jobs:
             fi
           fi
 
-          # 2) 系统不满足则下载官方预编译包；直连失败自动回退 ghproxy 镜像
+          # 2) 系统不满足则下载官方预编译包；依次尝试直连与多镜像回退
           PY="python-3.11.17-linux-22.04-x64.tar.gz"
           DIRECT="https://github.com/actions/python-versions/releases/download/3.11.17-36876195594/$PY"
-          MIRROR="https://ghfile.geekertao.top/$DIRECT"
+          MIRRORS=(
+            "$DIRECT"
+            "https://ghfile.geekertao.top/$DIRECT"
+            "https://cdn.gh-proxy.com/$DIRECT"
+          )
 
-          echo "[*] 尝试直连: $DIRECT"
-          if curl -fL --connect-timeout 10 --max-time 120 -o /tmp/py.tar.gz "$DIRECT" 2>/dev/null; then
-            echo "[ok] 直连下载成功"
-          else
-            echo "[!] 直连失败，切换镜像: $MIRROR"
-            curl -fL --connect-timeout 15 --max-time 180 -o /tmp/py.tar.gz "$MIRROR"
-            echo "[ok] 镜像下载成功"
+          DOWNLOADED=0
+          for URL in "${MIRRORS[@]}"; do
+            echo "[*] 尝试下载: $URL"
+            if curl -fL --connect-timeout 10 --max-time 120 -o /tmp/py.tar.gz "$URL" 2>/dev/null; then
+              echo "[ok] 下载成功: $URL"
+              DOWNLOADED=1
+              break
+            else
+              echo "[!] 失败，尝试下一个源"
+            fi
+          done
+
+          if [ "$DOWNLOADED" -eq 0 ]; then
+            echo "[x] 所有源均下载失败"
+            exit 1
           fi
 
           sudo mkdir -p /opt/python311
