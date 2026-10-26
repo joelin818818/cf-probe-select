@@ -63,8 +63,10 @@ jobs:
             SYS_VER=$(python3 -c 'import sys;print("%d.%d"%(sys.version_info[0],sys.version_info[1]))' 2>/dev/null || echo 0.0)
             if [ "$SYS_VER" = "3.11" ] || [ "$SYS_VER" \> "3.11" ] 2>/dev/null; then
               mkdir -p "$HOME/.local/bin"
-              ln -sf "$(command -v python3)" "$HOME/.local/bin/python"
-              ln -sf "$(command -v python3)" "$HOME/.local/bin/python3"
+              # readlink -f 解析真实路径，避免 command -v 返回软链自身导致循环软链（python3 -> 自己）
+              PYBIN=$(readlink -f "$(command -v python3)")
+              ln -sf "$PYBIN" "$HOME/.local/bin/python"
+              ln -sf "$PYBIN" "$HOME/.local/bin/python3"
               echo "[ok] 使用系统 Python $SYS_VER"
               python --version
               exit 0
