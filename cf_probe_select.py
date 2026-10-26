@@ -58,8 +58,8 @@ DNS_TIMEOUT_DOH = 5                     # DoH 解析超时
 CF_RANGES_TIMEOUT = 10                  # 拉取 Cloudflare 官方 IP 段的超时
 
 # ---- 优选 IP 测速（粗筛 TCP → 精测 TCP/TLS/首字节，加权评分）----
-TOP_IP_COUNT = 5                        # 写入 ips.txt 的优选 IP 数量
-IP_PRESELECT = 30                       # 粗筛阶段保留的候选 IP 数
+TOP_IP_COUNT = 50                       # 写入 ips.txt 的优选 IP 数量（同时作为 best_domains.txt 去重上限）
+IP_PRESELECT = 80                       # 粗筛阶段保留的候选 IP 数（须 ≥ TOP_IP_COUNT，保证精测候选充足、域名去重能凑满 50）
 IP_ROUNDS = 3                           # 精测阶段每个 IP 的测速轮数
 IP_WEIGHTS = {"tcp": 0.3, "tls": 0.4, "ttfb": 0.3}   # 三项指标权重，归一化后加权求和，越小越优
 # Cloudflare 免费 HTTPS 端口（已排除 443）：唯一数据源见仓库根 cf_ports.json（与 worker/worker.js 共用）

@@ -376,7 +376,19 @@ export default {
             errors.push(u + " => HTTP " + res.status);
             continue;
           }
-          return new Response(await res.text(), {
+          const raw = await res.text();
+          // ?s=N 控制显示条数：缺省 50；s=0 表示不显示；超出 50 仅取前 50
+          const sParam = url.searchParams.get("s");
+          let limit = 50;
+          if (sParam !== null) {
+            const n = parseInt(sParam, 10);
+            if (Number.isNaN(n) || n < 0) limit = 50;
+            else if (n === 0) limit = 0;
+            else limit = Math.min(n, 50);
+          }
+          const lines = raw.split("\n").filter((l) => l.length > 0);
+          const sliced = lines.slice(0, limit).join("\n");
+          return new Response(sliced.length ? sliced + "\n" : "", {
             headers: {
               "content-type": "text/plain; charset=utf-8",
               "cache-control": "no-store, no-cache, must-revalidate, max-age=0",
