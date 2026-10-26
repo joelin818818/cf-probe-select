@@ -19,7 +19,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, cf-probe]
     timeout-minutes: 20
     env:
-      PATH: "$HOME/.local/bin:$PATH"
+      PATH: "$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -132,6 +132,8 @@ jobs:
   summary:
     needs: speed-test
     runs-on: [self-hosted, linux, x64, cf-probe]
+    env:
+      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
     steps:
       - name: Download results
         uses: actions/download-artifact@v4
@@ -163,6 +165,8 @@ jobs:
     runs-on: [self-hosted, linux, x64, cf-probe]
     permissions:
       contents: write
+    env:
+      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
