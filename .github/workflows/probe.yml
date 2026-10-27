@@ -30,6 +30,8 @@ jobs:
           # 必须拉取完整历史，否则浅克隆下 git log 无法追溯到 worker/ 文件的最后提交，
           # 会导致 WORKER_VERSION 计算为空、版本号回落到部署时刻而每次都变。
           fetch-depth: 0
+          # SSH 部署密钥克隆
+          ssh-key: ${{ secrets.REPO_SSH_KEY }}
 
       - name: Detect region (CN → mirrors first, overseas → direct first)
         id: region
