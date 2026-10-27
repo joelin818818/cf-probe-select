@@ -193,27 +193,28 @@ CF_OWN_ROOT_DOMAINS = {
     "cf-ipfs.com",
 }
 
-# 巨型科技站黑名单（主域名）—— 走 CF 但非"冷门优选"目标，仅作矿源
-BIG_TECH_ROOTS = {
-    "google.com", "googleapis.com", "gstatic.com", "youtube.com", "gmail.com",
-    "googleblog.com", "googleusercontent.com",
-    "facebook.com", "fbcdn.net", "instagram.com", "whatsapp.com", "meta.com",
-    "messenger.com",
-    "microsoft.com", "windows.com", "windows.net", "azure.com", "azureedge.net",
-    "live.com", "bing.com", "office.com", "msn.com", "skype.com", "github.com",
-    "githubassets.com", "githubstatus.com", "githubusercontent.com", "github.io",
-    "github.blog", "gitlab.com", "linkedin.com", "apple.com", "icloud.com",
-    "amazon.com", "amazonaws.com", "cloudfront.net", "awsstatic.com", "twitch.tv",
-    "twitter.com", "x.com", "t.co", "wordpress.com", "w.org", "wordpress.org",
-    "wikipedia.org", "wikimedia.org", "mozilla.org", "mozilla.com", "firefox.com",
-    "schema.org", "w3.org", "yahoo.com", "baidu.com", "qq.com",
-    "tencent.com", "taobao.com", "aliyun.com", "alibabacloud.com", "jd.com",
-    "bilibili.com", "weibo.com", "sina.com", "sohu.com", "netflix.com",
-    "openai.com", "anthropic.com", "huggingface.co", "reddit.com", "pinterest.com",
-    "tiktok.com", "bytefcdn.com", "shopify.com", "salesforce.com", "oracle.com",
-    "ibm.com", "adobe.com", "akamai.com", "akamaized.net", "fastly.net",
-    "cloudfront.cn",
-}
+# [已停用] 巨型科技站黑名单（主域名）—— 原规则“走 CF 但非冷门优选目标，仅作矿源、不入库”。
+# 现改为允许入库（命中 Cloudflare 即入库），如需恢复排除，取消以下注释：
+# BIG_TECH_ROOTS = {
+#     "google.com", "googleapis.com", "gstatic.com", "youtube.com", "gmail.com",
+#     "googleblog.com", "googleusercontent.com",
+#     "facebook.com", "fbcdn.net", "instagram.com", "whatsapp.com", "meta.com",
+#     "messenger.com",
+#     "microsoft.com", "windows.com", "windows.net", "azure.com", "azureedge.net",
+#     "live.com", "bing.com", "office.com", "msn.com", "skype.com", "github.com",
+#     "githubassets.com", "githubstatus.com", "githubusercontent.com", "github.io",
+#     "github.blog", "gitlab.com", "linkedin.com", "apple.com", "icloud.com",
+#     "amazon.com", "amazonaws.com", "cloudfront.net", "awsstatic.com", "twitch.tv",
+#     "twitter.com", "x.com", "t.co", "wordpress.com", "w.org", "wordpress.org",
+#     "wikipedia.org", "wikimedia.org", "mozilla.org", "mozilla.com", "firefox.com",
+#     "schema.org", "w3.org", "yahoo.com", "baidu.com", "qq.com",
+#     "tencent.com", "taobao.com", "aliyun.com", "alibabacloud.com", "jd.com",
+#     "bilibili.com", "weibo.com", "sina.com", "sohu.com", "netflix.com",
+#     "openai.com", "anthropic.com", "huggingface.co", "reddit.com", "pinterest.com",
+#     "tiktok.com", "bytefcdn.com", "shopify.com", "salesforce.com", "oracle.com",
+#     "ibm.com", "adobe.com", "akamai.com", "akamaized.net", "fastly.net",
+#     "cloudfront.cn",
+# }
 
 IGNORE_EXTENSIONS = (
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".css", ".js",
@@ -260,9 +261,10 @@ def is_cloudflare_own_domain(domain: str) -> bool:
     return root in CF_OWN_ROOT_DOMAINS or "cloudflare" in domain.split(".")
 
 
-def is_big_tech(domain: str) -> bool:
-    root = get_registered_domain(domain)
-    return root in BIG_TECH_ROOTS
+# [已停用] 巨型站判定函数，随上方排除分支一并停用（取消注释可恢复）：
+# def is_big_tech(domain: str) -> bool:
+#     root = get_registered_domain(domain)
+#     return root in BIG_TECH_ROOTS
 
 
 MALICIOUS_EXACT = set()
@@ -847,9 +849,11 @@ def run_cf_explorer():
         is_cf = is_cloudflare_domain(current)
         root = get_registered_domain(current)
 
-        if is_big_tech(current):
-            tag, prio = "巨型站 不入库但扩散外链", False
-        elif is_malicious(current):
+        # [已停用] 巨型站不再强制排除：改为走下方普通 CF 域名流程（命中 Cloudflare 则入库，否则仅扩散外链）。
+        # 如需恢复“巨型站 不入库但扩散外链”，取消下面两行注释即可：
+        # if is_big_tech(current):
+        #     tag, prio = "巨型站 不入库但扩散外链", False
+        if is_malicious(current):
             tag, prio = "黑产域名 仅扩散外链", False
         elif is_blackhat_keyword(current):
             tag, prio = "黑产关键词 仅扩散外链", False
@@ -903,7 +907,7 @@ def run_cf_explorer():
     print("=" * 60)
     print(
         f"[!] 本轮结束：新增 {new_added} 个域名，文件总计 {len(saved)} 个"
-        f"（已过滤 CF 官方/巨型站，主域≤{MAX_SUBDOMAINS_PER_ROOT}）"
+        f"（已过滤 CF 官方域名；巨型站已放开入库，主域≤{MAX_SUBDOMAINS_PER_ROOT}）"
     )
 
 
