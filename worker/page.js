@@ -761,33 +761,50 @@ $("start").addEventListener("click", startTest);
 $("stop").addEventListener("click", stopTest);
 $("refresh").addEventListener("click", async () => { await loadDomains(); setInfo("已刷新域名列表"); });
 $("copyAll").addEventListener("click", copyAll);
-$("exportBtn").addEventListener("click", () => $("exportMask").classList.add("on"));
-$("expClose").addEventListener("click", () => $("exportMask").classList.remove("on"));
-$("exportMask").addEventListener("click", (e) => { if (e.target === $("exportMask")) $("exportMask").classList.remove("on"); });
-$("expGen").addEventListener("click", async () => {
-  $("expUrl").value = "生成中…";
-  $("expUrl").value = (await buildExportUrl()) || "暂无测速成功的域名，请先测速";
-});
-$("expCopy").addEventListener("click", () => {
-  if (!$("expUrl").value) return;
-  navigator.clipboard.writeText($("expUrl").value);
-  const old = $("expCopy").textContent;
-  $("expCopy").textContent = "已复制";
-  setTimeout(() => ($("expCopy").textContent = old), 1200);
-});
-function bindCopyLink(id, path) {
+// 导出弹层：打开即生成，随数量/端口/类型实时刷新三段链接
+function txtLink(path) {
+  const n = Math.max(1, Math.min(50, parseInt($("expCount").value, 10) || 20));
+  const port = $("expPort").value;
+  return location.origin + path + "?s=" + n + (port ? "&p=" + port : "");
+}
+let snapTimer = null;
+async function refreshSnapshot() {
+  const url = await buildExportUrl();
+  // 无测速结果时清空，由占位符显示提示
+  $("expUrl").value = url || "";
+}
+function refreshTxtLinks() {
+  $("urlDomains").value = txtLink("/best_domains.txt");
+  $("urlIps").value = txtLink("/ips.txt");
+}
+function refreshLinks() {
+  refreshTxtLinks();
+  clearTimeout(snapTimer);
+  snapTimer = setTimeout(refreshSnapshot, 250);
+}
+function bindCopy(id, inputId) {
   $(id).addEventListener("click", () => {
-    const n = Math.max(1, Math.min(50, parseInt($("expCount").value, 10) || 20));
-    const port = $("expPort").value;
-    const q = "?s=" + n + (port ? "&p=" + port : "");
-    navigator.clipboard.writeText(location.origin + path + q);
+    const v = $(inputId).value;
+    if (!v) return;
+    navigator.clipboard.writeText(v);
     const b = $(id), old = b.textContent;
     b.textContent = "已复制";
     setTimeout(() => (b.textContent = old), 1200);
   });
 }
-bindCopyLink("copyDomains", "/best_domains.txt");
-bindCopyLink("copyIps", "/ips.txt");
+bindCopy("expCopy", "expUrl");
+bindCopy("copyDomains", "urlDomains");
+bindCopy("copyIps", "urlIps");
+$("exportBtn").addEventListener("click", () => {
+  $("exportMask").classList.add("on");
+  refreshTxtLinks();
+  refreshSnapshot();
+});
+$("expClose").addEventListener("click", () => $("exportMask").classList.remove("on"));
+$("exportMask").addEventListener("click", (e) => { if (e.target === $("exportMask")) $("exportMask").classList.remove("on"); });
+document.querySelectorAll("input[name=expKind]").forEach((r) => r.addEventListener("change", refreshLinks));
+$("expCount").addEventListener("input", refreshLinks);
+$("expPort").addEventListener("change", refreshLinks);
 $("provider").addEventListener("change", (e) => { saveProvider(e.target.value); updateCustomUI(); });
 $("customDoh").addEventListener("input", (e) => { saveCustomDoh(e.target.value); updateCustomUI(); });
 $("resolveThreads").addEventListener("change", (e) => { saveResolveThreads(parseInt(e.target.value, 10) || 16); });
@@ -1003,6 +1020,8 @@ export function html(version) {
   .modal input[type=number] { width: 64px; padding: 0 8px; font-size: 13px; text-align: center; }
   .modal select { padding: 0 8px; font-size: 13px; cursor: pointer; }
   .modal input[type=text]:focus, .modal input[type=number]:focus, .modal select:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 2px rgba(188,207,228,0.35); }
+  .modal .lbl { flex: none; width: 56px; color: var(--fg-muted); }
+  .modal input.url { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -1073,27 +1092,32 @@ export function html(version) {
 <div class="mask" id="exportMask">
   <div class="modal">
     <h3>导出链接</h3>
+
     <div class="row">
       <label class="switch"><input type="radio" name="expKind" value="domain" checked> 域名</label>
       <label class="switch"><input type="radio" name="expKind" value="ip"> 首个 IP</label>
       <label class="switch">数量 <input id="expCount" type="number" min="1" max="20" value="20"></label>
       <label class="switch">端口 <select id="expPort">${portOpts}</select></label>
-      <button id="expGen">生成</button>
     </div>
     <div class="row">
-      <input id="expUrl" type="text" readonly placeholder="点「生成」后在此显示链接">
+      <input id="expUrl" class="url" type="text" readonly placeholder="暂无测速成功的域名，请先测速">
       <button id="expCopy" class="ghost">复制链接</button>
     </div>
-    <div class="note">内容已冻结，不受列表或排序变化影响。</div>
-    <div class="note">端口自动分配且固定；链接带签名，改动即失效。</div>
-    <div class="note">以下两项由 GitHub 服务器测速产出，每日自动更新（与本页浏览器测速无关）：</div>
+    <div class="note">快照链接：把当前测速成功的域名或首个 IP 写入 URL，内容冻结、带签名，改动即失效；端口默认自动分配。</div>
+
+    <div class="note">以下两项由 GitHub 服务器测速产出，每日自动更新，与本页浏览器测速无关：</div>
     <div class="row">
-      <span>域名结果 <a href="/best_domains.txt" target="_blank">/best_domains.txt</a></span>
+      <span class="lbl">域名结果</span>
+      <input id="urlDomains" class="url" type="text" readonly>
       <button id="copyDomains" class="ghost">复制链接</button>
-      <span>IP 结果 <a href="/ips.txt" target="_blank">/ips.txt</a></span>
+    </div>
+    <div class="row">
+      <span class="lbl">IP 结果</span>
+      <input id="urlIps" class="url" type="text" readonly>
       <button id="copyIps" class="ghost">复制链接</button>
     </div>
-    <div class="note">以上两项支持 ?s=N 控制条数、?p=PORT 指定端口（默认 50 条、最多 50 条、s=0 为空；p 省略按原分配）。</div>
+    <div class="note">以上两项支持 ?s=N 控制条数（缺省 50、上限 50、s=0 为空）与 ?p=PORT 指定端口（缺省按原分配）。</div>
+
     <div class="row" style="justify-content:flex-end"><button id="expClose" class="ghost">关闭</button></div>
   </div>
 </div>
