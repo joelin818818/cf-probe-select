@@ -179,6 +179,7 @@ https://<你的 Worker 域名>/best_domains.txt
 - 地址由 `RAW_DOMAINS_URL` 替换文件名得到，fork 后自动跟随当前仓库；
 - 主源失败时同样回退 jsDelivr / gitmirror 镜像；
 - 文件随每次 Actions 运行更新，无需重新部署 Worker。
+- 支持 `?s=N` 控制条数（缺省 50、0 为空、上限 50）与 `?p=PORT` 覆盖端口（缺省按原分配），例：`/ips.txt?s=10&p=443`。
 
 ## 文件结构
 

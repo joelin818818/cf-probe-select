@@ -300,6 +300,23 @@ function portFor(item) {
   return IP_PORTS.length ? IP_PORTS[h % IP_PORTS.length] : 0;
 }
 
+// ?p=PORT 覆盖端口：仅接受 1-65535 的整数，非法/缺省返回 0（表示按原分配）
+function parsePort(v) {
+  if (v == null) return 0;
+  const n = parseInt(v, 10);
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : 0;
+}
+
+// 把 "host:port[#label]" 的端口替换为指定值；无端口则原样返回
+function setPort(line, port) {
+  const hashIdx = line.indexOf("#");
+  const body = hashIdx >= 0 ? line.slice(0, hashIdx) : line;
+  const label = hashIdx >= 0 ? line.slice(hashIdx) : "";
+  const colonIdx = body.lastIndexOf(":");
+  if (colonIdx <= 0) return line;
+  return body.slice(0, colonIdx) + ":" + port + label;
+}
+
 // 导出链接签名：密钥只在服务端，签名不匹配即说明列表被改动
 async function signItems(env, items) {
   if (!env || !env.SIGN_SECRET) return "";
@@ -386,8 +403,12 @@ export default {
             else if (n === 0) limit = 0;
             else limit = Math.min(n, 50);
           }
+          // ?p=PORT 覆盖每行端口；缺省保持原端口
+          const forcedPort = parsePort(url.searchParams.get("p"));
           const lines = raw.split("\n").filter((l) => l.length > 0);
-          const sliced = lines.slice(0, limit).join("\n");
+          const picked = lines.slice(0, limit);
+          const out = forcedPort ? picked.map((l) => setPort(l, forcedPort)) : picked;
+          const sliced = out.join("\n");
           return new Response(sliced.length ? sliced + "\n" : "", {
             headers: {
               "content-type": "text/plain; charset=utf-8",
@@ -417,7 +438,8 @@ export default {
       if (env && env.SIGN_SECRET && sig !== (await signItems(env, items))) {
         return new Response("snapshot signature mismatch", { status: 400 });
       }
-      return new Response(items.map((s) => s + ":" + portFor(s)).join("\n") + "\n", {
+      const forcedPort = parsePort(url.searchParams.get("p"));
+      return new Response(items.map((s) => s + ":" + (forcedPort || portFor(s))).join("\n") + "\n", {
         headers: {
           "content-type": "text/plain; charset=utf-8",
           "cache-control": "no-store, no-cache, must-revalidate, max-age=0",

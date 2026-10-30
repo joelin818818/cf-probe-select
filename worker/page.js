@@ -1,12 +1,20 @@
 // 前端页面模块：返回完整的 HTML 页面字符串（含内联前端脚本）
 // DNS 服务商列表从 worker.js 导入（全仓库唯一来源）
 import { DNS_PROVIDER_LIST, materializeDoh } from "./worker.js";
+import IP_PORTS from "../cf_ports.json";
 
 // 生成 DNS 服务商下拉选项（按数组顺序）
 function providerOptions() {
   return DNS_PROVIDER_LIST
     .map((p) => '<option value="' + p.key + '">' + p.label + "</option>")
     .join("");
+}
+
+// 端口下拉：空=按原分配；443 标准 HTTPS；其余取 cf_ports.json 端口池
+function portOptions() {
+  const ports = Array.from(new Set([443, ...IP_PORTS]));
+  return '<option value="">原端口</option>' +
+    ports.map((p) => '<option value="' + p + '">' + p + "</option>").join("");
 }
 
 // 前端浏览器脚本（内联，浏览器环境无模块系统）
@@ -533,7 +541,9 @@ async function buildExportUrl() {
   } catch (e) {
     sig = "";
   }
-  return location.origin + "/s/" + items.join("/") + ".txt" + (sig ? "?sig=" + sig : "");
+  const port = $("expPort").value;
+  return location.origin + "/s/" + items.join("/") + ".txt" +
+    (sig ? "?sig=" + sig : "") + (port ? (sig ? "&" : "?") + "p=" + port : "");
 }
 
 function ipHtml(domain) {
@@ -767,7 +777,10 @@ $("expCopy").addEventListener("click", () => {
 });
 function bindCopyLink(id, path) {
   $(id).addEventListener("click", () => {
-    navigator.clipboard.writeText(location.origin + path);
+    const n = Math.max(1, Math.min(50, parseInt($("expCount").value, 10) || 20));
+    const port = $("expPort").value;
+    const q = "?s=" + n + (port ? "&p=" + port : "");
+    navigator.clipboard.writeText(location.origin + path + q);
     const b = $(id), old = b.textContent;
     b.textContent = "已复制";
     setTimeout(() => (b.textContent = old), 1200);
@@ -821,6 +834,7 @@ initControls();
 
 export function html(version) {
   const options = providerOptions();
+  const portOpts = portOptions();
   // 公开 DoH 地址映射（供浏览器客户端直连使用；custom 用用户填写的地址）
   const dohUrls = {};
   DNS_PROVIDER_LIST.forEach((p) => {
@@ -1061,6 +1075,7 @@ export function html(version) {
       <label class="switch"><input type="radio" name="expKind" value="domain" checked> 域名</label>
       <label class="switch"><input type="radio" name="expKind" value="ip"> 首个 IP</label>
       <label class="switch">数量 <input id="expCount" type="number" min="1" max="20" value="20"></label>
+      <label class="switch">端口 <select id="expPort">${portOpts}</select></label>
       <button id="expGen">生成</button>
     </div>
     <div class="row">
@@ -1076,7 +1091,7 @@ export function html(version) {
       <span>IP 结果 <a href="/ips.txt" target="_blank">/ips.txt</a></span>
       <button id="copyIps" class="ghost">复制链接</button>
     </div>
-    <div class="note">以上两项支持 ?s=N 控制显示条数：默认 50 条、s=0 为空、最多 50 条（例：/best_domains.txt?s=5）。</div>
+    <div class="note">以上两项支持 ?s=N 控制条数、?p=PORT 指定端口（默认 50 条、最多 50 条、s=0 为空；p 省略按原分配）。</div>
     <div class="row" style="justify-content:flex-end"><button id="expClose" class="ghost">关闭</button></div>
   </div>
 </div>
